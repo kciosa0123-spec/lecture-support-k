@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>講義支援ツール（近畿大学）</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; line-height: 1.6; }
+    h2 { color: #333; }
+    .box { background: #f5f5f5; padding: 20px; border-radius: 8px; margin-top: 20px; }
+    button { background: #4285f4; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 4px; cursor: pointer; transition: 0.3s; width: 100%; }
+    button:hover { background: #3367d6; }
+    button:disabled { background: #999; cursor: not-allowed; }
+    #attendance-btn.submitted { background-color: #28a745 !important; }
+    textarea { width: 100%; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+    .profile { background: #e8f0fe; padding: 10px; border-radius: 4px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
+    .status { margin-top: 10px; padding: 10px; border-radius: 4px; display: none; }
+    .status.success { background: #d4edda; color: #155724; display: block; }
+    #attendance-section { margin-bottom: 25px; padding: 15px; border: 2px solid #e0e0e0; border-radius: 8px; background: #fff; text-align: center; }
+  </style>
+</head>
+<body>
+  <h2>講義支援ツール（近畿大学）</h2>
+
+  <div id="login-section" class="box">
+    <p>近畿大学のGoogleアカウント（@waka... または @nara...）でログインしてください。</p>
+    <button id="login-btn">Googleでログイン</button>
+  </div>
+
+  <div id="main-section" class="box" style="display:none;">
+    <div class="profile">
+      <span id="display-profile"></span>
+      <button id="logout-btn" style="width:auto; padding:6px 12px; background:#999;">ログアウト</button>
+    </div>
+
+    <div id="attendance-section">
+      <p id="session-label" style="font-size: 0.9em; color: #666; margin-bottom: 5px;">講義読み込み中...</p>
+      <p id="attendance-status" style="margin-bottom: 10px; font-weight: bold;">本日の出席登録</p>
+      <button id="attendance-btn">出席を送信する</button>
+    </div>
+
+    <p style="font-weight: bold; margin-bottom: 10px;">質問・コメント</p>
+    <textarea id="question-text" rows="5" placeholder="入力してください（1000文字以内）"></textarea>
+    <br><br>
+    <button id="send-btn">メッセージを送信</button>
+    <div id="status" class="status"></div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+    import { getDatabase, ref, push, set, get, onValue, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
+
+    // ★ 近畿大学用プロジェクトの設定に書き換えてください
+    const firebaseConfig = {
+      apiKey: "AIzaSyClWAd9abHRIb6-mHDqU8df-r2zTXkC4Dc",
+      authDomain: "lecture-support-kindai.firebaseapp.com",
+      databaseURL: "https://lecture-support-kindai-default-rtdb.firebaseio.com",
+      projectId: "lecture-support-kindai",
+      storageBucket: "lecture-support-kindai.firebasestorage.app",
+      messagingSenderId: "1009012365626",
+      appId: "1:1009012365626:web:13156cb27fd5d3a3ed1803"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getDatabase(app);
+    const provider = new GoogleAuthProvider();
+
+    // 許可ドメインのリスト
+    const ALLOWED_DOMAINS = ["@waka.kindai.ac.jp", "@nara.kindai.ac.jp"];
+    let currentSessionLabel = "";
+    let currentSafePath = "";
+
+    const statusDiv = document.getElementById('status');
+    const attendanceBtn = document.getElementById('attendance-btn');
+
+    onValue(ref(db, 'active_session'), (snapshot) => {
+      const data = snapshot.val();
+      if (data && data.label) {
+        currentSessionLabel = data.label;
+        currentSafePath = data.label.replace(/[.#$/[\]]/g, "_");
+        document.getElementById('session-label').innerText = `現在の講義：${data.label}`;
+        if (auth.currentUser) checkAttendance(auth.currentUser.email.split('@')[0]);
+      } else {
+        document.getElementById('session-label').innerText = "現在の講義：未設定（教員の開始待ち）";
+      }
+    });
+
+    async function checkAttendance(studentId) {
+      if (!currentSafePath) return;
+      const snapshot = await get(ref(db, `attendance/${currentSafePath}/${studentId}`));
+      if (snapshot.exists()) {
+        attendanceBtn.innerText = "出席済み";
+        attendanceBtn.classList.add('submitted');
+        attendanceBtn.disabled = true;
+      } else {
+        attendanceBtn.innerText = "出席を送信する";
+        attendanceBtn.classList.remove('submitted');
+        attendanceBtn.disabled = false;
+      }
+    }
+
+    onAuthStateChanged(auth, (user) => {
+      if (user && ALLOWED_DOMAINS.some(domain => user.email.endsWith(domain))) {
+        document.getElementById('login-section').style.display = 'none';
+        document.getElementById('main-section').style.display = 'block';
+        document.getElementById('display-profile').textContent = `${user.displayName} さん`;
+        checkAttendance(user.email.split('@')[0]);
+      } else {
+        document.getElementById('login-section').style.display = 'block';
+        document.getElementById('main-section').style.display = 'none';
+        if (user) { alert("近畿大学のアカウントでログインしてください。"); signOut(auth); }
+      }
+    });
+
+    attendanceBtn.addEventListener('click', async () => {
+      if (!currentSafePath) return alert("講義が開始されていません。");
+      const user = auth.currentUser;
+      const studentId = user.email.split('@')[0];
+      attendanceBtn.disabled = true;
+      try {
+        await set(ref(db, `attendance/${currentSafePath}/${studentId}`), {
+          studentName: user.displayName,
+          timestamp: serverTimestamp()
+        });
+        checkAttendance(studentId);
+      } catch (e) { alert("送信エラー"); attendanceBtn.disabled = false; }
+    });
+
+    document.getElementById('send-btn').addEventListener('click', async () => {
+      const text = document.getElementById('question-text').value.trim();
+      if (!text || !currentSafePath) return;
+      document.getElementById('send-btn').disabled = true;
+      try {
+        await push(ref(db, `questions/${currentSafePath}`), {
+          studentId: auth.currentUser.email.split('@')[0],
+          studentName: auth.currentUser.displayName,
+          content: text,
+          timestamp: serverTimestamp()
+        });
+        document.getElementById('question-text').value = '';
+        statusDiv.innerText = "送信しました。";
+        statusDiv.className = "status success";
+        setTimeout(() => statusDiv.className = "status", 3000);
+      } finally { document.getElementById('send-btn').disabled = false; }
+    });
+
+    document.getElementById('login-btn').onclick = () => signInWithPopup(auth, provider);
+    document.getElementById('logout-btn').onclick = () => signOut(auth);
+  </script>
+</body>
+</html>
