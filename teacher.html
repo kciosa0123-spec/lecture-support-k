@@ -17,7 +17,7 @@
     .btn-danger { background: #dc3545; }
     .btn-secondary { background: #6c757d; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
-    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+    th, td { text-align: left; padding: 10px; border-bottom: 1px solid #eee; }
     th { background: #f8f9fa; }
     .archive-actions { display: none; margin-top: 10px; background: #f1f3f4; padding: 10px; border-radius: 4px; }
     .question-card { background: white; border: 1px solid #ddd; border-left: 4px solid #4285f4; padding: 14px; margin-bottom: 12px; border-radius: 6px; }
@@ -42,10 +42,7 @@
         <div><label>時限</label><select id="sel-period"><option selected>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></div>
         <div><label>科目名</label>
           <select id="sel-subject">
-            <option>理系英語1</option>
-            <option>理系英語2</option>
-            <option>英語3</option>
-            <option>英語4</option>
+            <option>理系英語1</option><option>理系英語2</option><option>英語3</option><option>英語4</option>
           </select>
         </div>
         <div><label>回数</label><input type="number" id="inp-count" value="1"></div>
@@ -105,25 +102,23 @@
     import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
     import { getDatabase, ref, set, get, onValue, onChildAdded, onChildChanged, update, remove } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
 
-    // ★ ステップ1で取得した近大版Configをここに貼り付けてください
+    // ★ 近大プロジェクトのConfigに差し替えてください
     const firebaseConfig = {
-      apiKey: "AIzaSyClWAd9abHRIb6-mHDqU8df-r2zTXkC4Dc",
-      authDomain: "lecture-support-kindai.firebaseapp.com",
-      databaseURL: "https://lecture-support-kindai-default-rtdb.firebaseio.com",
-      projectId: "lecture-support-kindai",
-      storageBucket: "lecture-support-kindai.firebasestorage.app",
-      messagingSenderId: "1009012365626",
-      appId: "1:1009012365626:web:13156cb27fd5d3a3ed1803"
-      };
+  apiKey: "AIzaSyClWAd9abHRIb6-mHDqU8df-r2zTXkC4Dc",
+  authDomain: "lecture-support-kindai.firebaseapp.com",
+  databaseURL: "https://lecture-support-kindai-default-rtdb.firebaseio.com",
+  projectId: "lecture-support-kindai",
+  storageBucket: "lecture-support-kindai.firebasestorage.app",
+  messagingSenderId: "1009012365626",
+  appId: "1:1009012365626:web:13156cb27fd5d3a3ed1803"
+};
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getDatabase(app);
     const provider = new GoogleAuthProvider();
 
-    // 管理者アカウント設定
     const TEACHER_EMAILS = ["0499b1@waka.kindai.ac.jp", "ng_osada@nara.kindai.ac.jp"];
-    
     document.getElementById('inp-date').valueAsDate = new Date();
     let currentSession = "";
 
@@ -137,20 +132,35 @@
       setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 150);
     }
 
-    const loginBtn = document.getElementById('login-btn');
-    loginBtn.onclick = async () => { try { await signInWithPopup(auth, provider); } catch (e) { document.getElementById('login-error').innerText = "ログイン失敗"; } };
-    document.getElementById('logout-btn').onclick = () => { signOut(auth); location.reload(); };
-
+    // --- 安全な認証監視 (ガード強化) ---
     onAuthStateChanged(auth, (user) => {
-      if (user && TEACHER_EMAILS.includes(user.email)) {
+      // ユーザーが存在し、かつメールアドレスが設定されているか確認
+      if (user && user.email && TEACHER_EMAILS.includes(user.email)) {
         document.getElementById('login-section').style.display = 'none';
         document.getElementById('dashboard-section').style.display = 'block';
         document.getElementById('user-info').innerText = user.email;
-        onValue(ref(db, 'active_session'), (snap) => {
-          const val = snap.val(); if (val) { document.getElementById('active-label').innerText = val.label; currentSession = val.label; startMonitoring(val.label); }
-        });
-      } else if (user) { alert("管理者権限がありません。"); signOut(auth); }
+        initDashboard();
+      } else if (user) {
+        // ログインはしているが権限がない場合
+        alert("管理者権限がないアカウントです。");
+        signOut(auth);
+      } else {
+        // 未ログイン状態
+        document.getElementById('login-section').style.display = 'block';
+        document.getElementById('dashboard-section').style.display = 'none';
+      }
     });
+
+    function initDashboard() {
+      onValue(ref(db, 'active_session'), (snap) => {
+        const val = snap.val();
+        if (val) {
+          document.getElementById('active-label').innerText = val.label;
+          currentSession = val.label;
+          startMonitoring(val.label);
+        }
+      });
+    }
 
     function startMonitoring(label) {
       const path = label.replace(/[.#$/[\]]/g, "_");
@@ -193,7 +203,7 @@
 
     window.deleteSession = async (name) => {
       if (confirm(`「${name}」を完全に削除しますか？`)) {
-        if (confirm(`最終確認です。本当によろしいですか？`)) {
+        if (confirm(`本当に削除しますか？`)) {
           await remove(ref(db, `attendance/${name}`)); await remove(ref(db, `questions/${name}`));
           alert("削除完了"); loadArchive(true);
         }
@@ -245,7 +255,7 @@
         });
         archiveArea.innerHTML = html + "</tbody></table>";
       }
-      if (!silent) { archiveArea.style.display = 'block'; loadArchiveBtn.innerText = '隠す'; }
+      if (!silent) { archiveArea.style.display = 'block'; loadArchiveBtn.innerText = 'リストを隠す'; }
     }
     loadArchiveBtn.onclick = async () => { if (archiveArea.style.display === 'block') { archiveArea.style.display = 'none'; loadArchiveBtn.innerText = 'リストを表示'; } else { await loadArchive(); } };
 
@@ -260,6 +270,7 @@
     };
 
     document.getElementById('toggle-list-btn').onclick = () => { const el = document.getElementById('attendance-list-container'); el.style.display = el.style.display === 'none' ? 'block' : 'none'; };
+    document.getElementById('login-btn').onclick = () => signInWithPopup(auth, provider);
   </script>
 </body>
 </html>
