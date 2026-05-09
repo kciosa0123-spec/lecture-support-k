@@ -1,1 +1,1 @@
-# -kciosa0123-spec-lecture-support-k
+# lecture-support-k
