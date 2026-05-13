@@ -33,7 +33,6 @@
   <div id="login-section" class="box" style="text-align: center; padding: 40px;">
     <p>近大管理アカウントでログインしてください。</p>
     <button id="login-btn" type="button" class="btn-blue" style="font-size: 18px;">Googleでログイン</button>
-    <p id="login-error" style="color:#c00; margin-top:15px;"></p>
   </div>
 
   <div id="dashboard-section" style="display:none;">
@@ -42,10 +41,8 @@
       <div class="session-grid">
         <div><label>曜日</label><select id="sel-day"><option>月</option><option>火</option><option>水</option><option>木</option><option>金</option><option>土</option></select></div>
         <div><label>時限</label><select id="sel-period"><option selected>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></div>
-        <div><label>科目名</label><select id="sel-subject">
-          <option>理系英語1</option><option>理系英語2</option><option>英語3</option><option>英語4</option>
-        </select></div>
-        <div><label>回数</label><input type="number" id="inp-count" value="1"></div>
+        <div><label>科目名</label><select id="sel-subject"><option>理系英語1</option><option>理系英語2</option><option>英語3</option><option>英語4</option></select></div>
+        <div><label>回数</label><select id="sel-count"></select></div>
         <div><label>日付</label><input type="date" id="inp-date"></div>
       </div>
       <div style="display: flex; gap: 10px; align-items: center;">
@@ -58,18 +55,11 @@
     <div class="box" style="border-left: 4px solid #17a2b8;">
       <p style="margin:0 0 10px 0; font-weight: bold;">過去データの万能検索</p>
       <div style="display:flex; gap:10px; margin-bottom:10px;">
-        <input type="text" id="search-keyword" placeholder="検索キーワード（内容または氏名）" style="flex:2;">
-        <input type="text" id="search-id" placeholder="学籍番号（任意）" style="flex:1;">
+        <input type="text" id="search-keyword" placeholder="キーワード" style="flex:2;">
+        <input type="text" id="search-id" placeholder="学籍番号" style="flex:1;">
         <button id="search-btn" type="button" class="btn-blue">検索</button>
       </div>
-      <div id="search-results-area" style="display:none;">
-        <hr>
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <p id="search-status" style="margin:5px 0; font-size:0.9em; color:#666;"></p>
-          <button id="close-search-btn" type="button" class="btn-secondary" style="padding:2px 10px; font-size:11px;">閉じる</button>
-        </div>
-        <div id="search-table-container"></div>
-      </div>
+      <div id="search-results-area" style="display:none;"><hr><div id="search-table-container"></div><button id="close-search-btn" class="btn-secondary" style="margin-top:10px;">閉じる</button></div>
     </div>
 
     <div class="box">
@@ -128,7 +118,17 @@
     const TEACHER_EMAILS = ["0499b1@waka.kindai.ac.jp", "ng_osada@nara.kindai.ac.jp"];
     let currentSession = "";
 
-    // 【自動連動】日付と曜日の初期設定
+    // 【新機能】回数プルダウンの生成と自動引き継ぎ
+    const selCount = document.getElementById('sel-count');
+    for (let i = 1; i <= 15; i++) {
+      const opt = document.createElement('option');
+      opt.value = i; opt.innerText = `第${i}回`;
+      selCount.appendChild(opt);
+    }
+    const lastCount = localStorage.getItem('kindai_last_count');
+    if (lastCount) selCount.value = lastCount;
+
+    // 日付と曜日の自動設定
     const now = new Date();
     document.getElementById('inp-date').valueAsDate = now;
     const dayIdx = now.getDay();
@@ -165,12 +165,19 @@
             document.getElementById('attendance-count').innerText = "0";
           }
         });
-      } else if (user) { alert("権限なし"); signOut(auth); }
+      } else if (user) { alert("権限なし"); handleLogout(); }
     });
+
+    async function handleLogout() { try { await signOut(auth); location.reload(); } catch (e) {} }
 
     startBtn.onclick = async () => {
       const d = new Date(document.getElementById('inp-date').value);
-      const label = `${document.getElementById('sel-day').value}${document.getElementById('sel-period').value}${document.getElementById('sel-subject').value} 第${document.getElementById('inp-count').value}回(${d.getMonth()+1}/${d.getDate()})`;
+      const countVal = selCount.value;
+      const label = `${document.getElementById('sel-day').value}${document.getElementById('sel-period').value}${document.getElementById('sel-subject').value} 第${countVal}回(${d.getMonth()+1}/${d.getDate()})`;
+      
+      // 回数を記憶
+      localStorage.setItem('kindai_last_count', countVal);
+      
       await set(ref(db, 'active_session'), { label: label });
       alert("講義情報を更新しました。");
     };
@@ -182,53 +189,41 @@
       }
     };
 
-    // 万能検索
+    // 万能検索ロジック (維持)
     document.getElementById('search-btn').onclick = async () => {
       const keyword = document.getElementById('search-keyword').value.toLowerCase().trim();
       const targetId = document.getElementById('search-id').value.trim();
-      if (!keyword && !targetId) return alert("検索条件を入力してください。");
-
+      if (!keyword && !targetId) return alert("条件を入れてください。");
       const sBtn = document.getElementById('search-btn');
-      sBtn.disabled = true; sBtn.innerText = "検索中...";
-
+      sBtn.disabled = true; sBtn.innerText = "中...";
       const [attSnap, qSnap] = await Promise.all([get(ref(db, 'attendance')), get(ref(db, 'questions'))]);
-      const allAtt = attSnap.val() || {};
-      const allQ = qSnap.val() || {};
-      const results = [];
-
+      const allAtt = attSnap.val() || {}; const allQ = qSnap.val() || {}; const results = [];
       Object.keys(allAtt).forEach(sName => {
         Object.keys(allAtt[sName]).forEach(sid => {
-          const a = allAtt[sName][sid];
-          const name = a.studentName || "";
+          const a = allAtt[sName][sid]; const name = a.studentName || "";
           if ((targetId && sid.includes(targetId)) || (keyword && name.includes(keyword))) {
             results.push({ type: "出席", session: sName, studentId: sid, studentName: name, content: "---", timestamp: a.timestamp });
           }
         });
       });
-
       Object.keys(allQ).forEach(sName => {
         Object.keys(allQ[sName]).forEach(qKey => {
-          const q = allQ[sName][qKey];
-          const content = (q.content || "").toLowerCase();
-          const sid = q.studentId || "";
-          const name = q.studentName || "";
+          const q = allQ[sName][qKey]; const content = (q.content || "").toLowerCase(); const sid = q.studentId || ""; const name = q.studentName || "";
           if ((!keyword || content.includes(keyword) || name.includes(keyword)) && (!targetId || sid.includes(targetId))) {
             results.push({ type: "質問", session: sName, studentId: sid, studentName: name, content: q.content, timestamp: q.timestamp });
           }
         });
       });
-
       results.sort((a, b) => b.timestamp - a.timestamp);
-      document.getElementById('search-status').innerText = `${results.length} 件発見。`;
-      let html = "<table><thead><tr><th>種別</th><th>講義回</th><th>番号</th><th>名前</th><th>内容</th></tr></thead><tbody>";
-      results.forEach(r => {
-        html += `<tr><td><span style="font-size:10px; padding:2px 4px; border-radius:3px; background:${r.type==='出席'?'#e8f5e9':'#e3f2fd'}">${r.type}</span></td><td>${r.session}</td><td>${r.studentId}</td><td>${r.studentName}</td><td style="white-space:pre-wrap;">${r.content}</td></tr>`;
-      });
+      document.getElementById('search-status').innerText = `${results.length} 件。`;
+      let html = "<table><thead><tr><th>種別</th><th>講義</th><th>番号</th><th>名前</th><th>内容</th></tr></thead><tbody>";
+      results.forEach(r => { html += `<tr><td><span style="font-size:10px; padding:2px 4px; border-radius:3px; background:${r.type==='出席'?'#e8f5e9':'#e3f2fd'}">${r.type}</span></td><td>${r.session}</td><td>${r.studentId}</td><td>${r.studentName}</td><td style="white-space:pre-wrap;">${r.content}</td></tr>`; });
       document.getElementById('search-table-container').innerHTML = html + "</tbody></table>";
       document.getElementById('search-results-area').style.display = 'block';
       sBtn.disabled = false; sBtn.innerText = "検索";
     };
 
+    // フィルタ・監視・アーカイブ (維持)
     document.getElementById('filter-all-btn').onclick = function() { qContainer.classList.remove('hide-answered'); this.classList.add('active'); document.getElementById('filter-unanswered-btn').classList.remove('active'); };
     document.getElementById('filter-unanswered-btn').onclick = function() { qContainer.classList.add('hide-answered'); this.classList.add('active'); document.getElementById('filter-all-btn').classList.remove('active'); };
 
