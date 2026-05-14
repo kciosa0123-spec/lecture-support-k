@@ -153,3 +153,135 @@
             labelEl.style.color = "#28a745";
             startBtn.innerText = "情報を更新";
             startBtn.className = "btn-success";
+            endBtn.style.display = "inline-block";
+            startMonitoring(val.label);
+          } else {
+            currentSession = "";
+            labelEl.innerText = "未設定";
+            labelEl.style.color = "#666";
+            startBtn.innerText = "講義を開始";
+            startBtn.className = "btn-warning";
+            endBtn.style.display = "none";
+            qContainer.innerHTML = "講義を開始してください。";
+            document.getElementById('attendance-count').innerText = "0";
+          }
+        });
+      } else if (user) { alert("権限なし"); handleLogout(); }
+    });
+
+    async function handleLogout() { try { await signOut(auth); location.reload(); } catch (e) {} }
+
+    startBtn.onclick = async () => {
+      const d = new Date(document.getElementById('inp-date').value);
+      const countVal = selCount.value;
+      const label = `${document.getElementById('sel-day').value}${document.getElementById('sel-period').value}${document.getElementById('sel-subject').value} 第${countVal}回(${d.getMonth()+1}/${d.getDate()})`;
+      localStorage.setItem('kindai_last_count', countVal);
+      await set(ref(db, 'active_session'), { label: label });
+      alert("講義情報を更新しました。");
+    };
+
+    endBtn.onclick = async () => {
+      if (confirm("講義を終了しますか？")) {
+        await remove(ref(db, 'active_session'));
+        location.reload();
+      }
+    };
+
+    // 万能検索ロジック
+    document.getElementById('search-btn').onclick = async () => {
+      const keyword = document.getElementById('search-keyword').value.toLowerCase().trim();
+      const targetId = document.getElementById('search-id').value.trim();
+      if (!keyword && !targetId) return alert("検索条件を入力してください。");
+      const sBtn = document.getElementById('search-btn');
+      sBtn.disabled = true; sBtn.innerText = "検索中...";
+      const [attSnap, qSnap] = await Promise.all([get(ref(db, 'attendance')), get(ref(db, 'questions'))]);
+      const allAtt = attSnap.val() || {}; const allQ = qSnap.val() || {}; const results = [];
+      Object.keys(allAtt).forEach(sName => {
+        Object.keys(allAtt[sName]).forEach(sid => {
+          const a = allAtt[sName][sid]; const name = a.studentName || "";
+          if ((targetId && sid.includes(targetId)) || (keyword && name.includes(keyword))) {
+            results.push({ type: "出席", session: sName, studentId: sid, studentName: name, content: "---", timestamp: a.timestamp });
+          }
+        });
+      });
+      Object.keys(allQ).forEach(sName => {
+        Object.keys(allQ[sName]).forEach(qKey => {
+          const q = allQ[sName][qKey]; const content = (q.content || "").toLowerCase(); const sid = q.studentId || ""; const name = q.studentName || "";
+          if ((!keyword || content.includes(keyword) || name.includes(keyword)) && (!targetId || sid.includes(targetId))) {
+            results.push({ type: "質問", session: sName, studentId: sid, studentName: name, content: q.content, timestamp: q.timestamp });
+          }
+        });
+      });
+      results.sort((a, b) => b.timestamp - a.timestamp);
+      document.getElementById('search-status').innerText = `${results.length} 件見つかりました。`;
+      let html = "<table><thead><tr><th>種別</th><th>講義</th><th>番号</th><th>名前</th><th>内容</th></tr></thead><tbody>";
+      results.forEach(r => { html += `<tr><td><span style="font-size:10px; padding:2px 4px; border-radius:3px; background:${r.type==='出席'?'#e8f5e9':'#e3f2fd'}">${r.type}</span></td><td>${r.session}</td><td>${r.studentId}</td><td>${r.studentName}</td><td style="white-space:pre-wrap;">${r.content}</td></tr>`; });
+      document.getElementById('search-table-container').innerHTML = html + "</tbody></table>";
+      document.getElementById('search-results-area').style.display = 'block';
+      sBtn.disabled = false; sBtn.innerText = "検索";
+    };
+
+    // フィルター・監視・アーカイブ (維持)
+    document.getElementById('filter-all-btn').onclick = function() { qContainer.classList.remove('hide-answered'); this.classList.add('active'); document.getElementById('filter-unanswered-btn').classList.remove('active'); };
+    document.getElementById('filter-unanswered-btn').onclick = function() { qContainer.classList.add('hide-answered'); this.classList.add('active'); document.getElementById('filter-all-btn').classList.remove('active'); };
+
+    function startMonitoring(label) {
+      const path = label.replace(/[.#$/[\]]/g, "_");
+      onValue(ref(db, `attendance/${path}`), (s) => {
+        const d = s.val() || {}; const ids = Object.keys(d).sort();
+        document.getElementById('attendance-count').innerText = ids.length;
+        document.getElementById('attendance-list-body').innerHTML = ids.map(id => `<tr><td>${id}</td><td>${d[id].studentName}</td><td>${new Date(d[id].timestamp).toLocaleTimeString()}</td></tr>`).join('');
+      });
+      onChildAdded(ref(db, `questions/${path}`), (s) => renderQuestion(s.key, s.val()));
+      onChildChanged(ref(db, `questions/${path}`), (s) => renderQuestion(s.key, s.val()));
+    }
+
+    function renderQuestion(key, data) {
+      if (qContainer.innerText.includes("開始してください")) qContainer.innerHTML = "";
+      let card = document.getElementById(`q-${key}`);
+      if (!card) { card = document.createElement('div'); card.id = `q-${key}`; qContainer.prepend(card); }
+      card.className = `question-card ${data.answered ? 'answered' : ''}`;
+      card.innerHTML = `<div style="font-size:12px; color:#666;">[${data.studentId}] ${data.studentName} <button type="button" onclick="window.toggleQ('${key}', ${!data.answered})" style="background:${data.answered?'#28a745':'#ffc107'}; color:${data.answered?'#fff':'#333'}; float:right; padding:2px 8px; font-size:11px; border-radius:4px;">${data.answered?'済':'未'}</button></div><div style="font-size:15px; margin-top:5px; white-space:pre-wrap;">${data.content || ""}</div>`;
+    }
+
+    window.toggleQ = (key, val) => update(ref(db, `questions/${currentSession.replace(/[.#$/[\]]/g, "_")}/${key}`), { answered: val });
+    window.toggleAction = (name) => { const el = document.getElementById(`actions-${name}`); el.style.display = el.style.display === 'block' ? 'none' : 'block'; };
+
+    document.getElementById('load-archive-btn').onclick = async () => {
+      const archiveArea = document.getElementById('archive-list-area');
+      if (archiveArea.style.display === 'block') { archiveArea.style.display = 'none'; return; }
+      const snap = await get(ref(db, 'attendance')); const d = snap.val();
+      if (!d) { archiveArea.innerHTML = "なし"; }
+      else {
+        let html = "<table><thead><tr><th>講義名</th><th>操作</th></tr></thead><tbody>";
+        Object.keys(d).sort().reverse().forEach(n => {
+          html += `<tr><td>${n}</td><td><button type="button" onclick="window.toggleAction('${n}')" class="btn-blue" style="padding:4px 8px; font-size:12px;">CSV</button><button type="button" onclick="window.deleteSession('${n}')" class="btn-danger" style="padding:4px 8px; font-size:12px; margin-left:5px;">削除</button><div id="actions-${n}" class="archive-actions"><button type="button" onclick="window.downloadArchive('attendance', '${n}')" class="btn-success" style="font-size:11px;">出席</button><button type="button" onclick="window.downloadArchive('questions', '${n}')" class="btn-secondary" style="font-size:11px; margin-left:5px;">質問</button></div></td></tr>`;
+        });
+        archiveArea.innerHTML = html + "</tbody></table>";
+      }
+      archiveArea.style.display = 'block';
+    };
+
+    window.downloadArchive = async (type, sessionName) => {
+      const snap = await get(ref(db, `${type}/${sessionName}`)); const data = snap.val(); if (!data) return alert("データなし");
+      let csv = (type === 'attendance') ? "学籍番号,氏名,日付,時刻\n" : "日付,時刻,学籍番号,氏名,内容,対応状況\n";
+      const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+      if (type === 'attendance') { Object.keys(data).sort().forEach(id => { const d = new Date(data[id].timestamp); csv += `"${id}","${data[id].studentName}","${d.toLocaleDateString('ja-JP')}","${d.toLocaleTimeString('ja-JP')}"\n`; }); }
+      else { Object.keys(data).forEach(k => { const q = data[k]; const d = new Date(q.timestamp); csv += `"${d.toLocaleDateString('ja-JP')}","${d.toLocaleTimeString('ja-JP')}","${q.studentId}","${q.studentName}","${(q.content || "").replace(/"/g,'""')}","${q.answered?'済':'未'}"\n`; }); }
+      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([bom, csv], { type: 'text/csv' })); a.download = `${type}_${sessionName}.csv`; a.click();
+    };
+
+    window.deleteSession = async (n) => { if (confirm("削除？")) { await remove(ref(db, `attendance/${n}`)); await remove(ref(db, `questions/${n}`)); location.reload(); } };
+    document.getElementById('summary-attendance-btn').onclick = async () => {
+      const snap = await get(ref(db, 'attendance')); const all = snap.val(); if (!all) return alert("なし");
+      const map = {}; Object.keys(all).forEach(s => { Object.keys(all[s]).forEach(id => { if (!map[id]) map[id] = { name: all[s][id].studentName, count: 0 }; map[id].count++; }); });
+      let csv = "学籍番号,氏名,回数\n"; Object.keys(map).sort().forEach(id => { csv += `"${id}","${map[id].name}","${map[id].count}"\n`; });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv' })); a.download = "総括出席表.csv"; a.click();
+    };
+
+    document.getElementById('login-btn').onclick = () => signInWithPopup(auth, provider);
+    document.getElementById('logout-btn').onclick = () => signOut(auth).then(() => location.reload());
+    document.getElementById('toggle-list-btn').onclick = () => { const el = document.getElementById('attendance-list-container'); el.style.display = el.style.display === 'none' ? 'block' : 'none'; };
+  </script>
+</body>
+</html>
