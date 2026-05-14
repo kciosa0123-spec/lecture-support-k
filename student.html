@@ -48,7 +48,15 @@
   import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
   import { getDatabase, ref, set, push, onValue, get } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
 
-  const firebaseConfig = { /* 近大のConfigをここに貼る */ };
+  const firebaseConfig = {
+  apiKey: "AIzaSyClWAd9abHRIb6-mHDqU8df-r2zTXkC4Dc",
+  authDomain: "lecture-support-kindai.firebaseapp.com",
+  databaseURL: "https://lecture-support-kindai-default-rtdb.firebaseio.com",
+  projectId: "lecture-support-kindai",
+  storageBucket: "lecture-support-kindai.firebasestorage.app",
+  messagingSenderId: "1009012365626",
+  appId: "1:1009012365626:web:13156cb27fd5d3a3ed1803"
+};
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getDatabase(app);
