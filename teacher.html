@@ -133,11 +133,10 @@
   const auth = getAuth(app);
   const db = getDatabase(app);
   const provider = new GoogleAuthProvider();
-  // 近大は waka/nara の2サブドメインがあるため hd は指定せず、
-  // 毎回アカウント選択画面を表示して @kindai.ac.jp 等への誤誘導を防ぐ
   provider.setCustomParameters({ prompt: 'select_account' });
 
   const ADMINS = ["0499b1@waka.kindai.ac.jp", "ng_osada@nara.kindai.ac.jp"];
+  const LECTURE_DURATION_MS = 110 * 60 * 1000; // 自動終了までの時間（110分）
   const timetable = {
     wed: { 2: "理系英語１", 3: "理系英語１", 4: "理系英語１" },
     thu: { 1: "英語３", 3: "英語３", 4: "英語３" }
@@ -146,7 +145,6 @@
   let viewingSessionId = "";
   let activeSessionId = "";
 
-  // タイムテーブルUI生成
   Object.keys(timetable).forEach(day => {
     const container = document.getElementById(`subjects-${day}`);
     for (let p = 1; p <= 4; p++) {
@@ -234,7 +232,6 @@
     startMonitoring(id);
   };
 
-  // フィルタ
   document.getElementById('filter-all-btn').onclick = function () {
     document.getElementById('questions-container').classList.remove('hide-answered');
     this.classList.add('active'); document.getElementById('filter-unanswered-btn').classList.remove('active');
@@ -249,8 +246,14 @@
       document.getElementById('login-section').classList.add('hidden');
       document.getElementById('dashboard-section').classList.remove('hidden');
       document.getElementById('user-info').textContent = u.email;
-      onValue(ref(db, 'active_session'), (s) => {
+      onValue(ref(db, 'active_session'), async (s) => {
         const v = s.val();
+        // 期限切れの自動クリーンアップ
+        if (v && v.expiresAt && Date.now() > v.expiresAt) {
+          console.log("期限切れの講義を自動終了します:", v.id);
+          await remove(ref(db, 'active_session'));
+          return;
+        }
         activeSessionId = (v && v.isOpen) ? v.id : "";
         document.getElementById('end-lecture-btn').classList.toggle('hidden', !activeSessionId);
         updateStartButtonState();
@@ -261,7 +264,6 @@
     }
   });
 
-  // 出席行を安全に組み立てるヘルパー（XSS対策）
   function buildAttendanceRow(e) {
     const tr = document.createElement('tr');
     const td1 = document.createElement('td'); td1.textContent = e.studentId || "";
@@ -272,7 +274,6 @@
     return tr;
   }
 
-  // 質問カードを安全に組み立てるヘルパー（XSS対策）
   function buildQuestionCard(key, q) {
     const content = q.body || q.text || "(内容なし)";
     const isRead = (q.read !== undefined) ? q.read : (q.answered || false);
@@ -298,7 +299,7 @@
 
     const body = document.createElement('div');
     body.className = 'q-body';
-    body.textContent = content; // ← textContent でXSS無効化
+    body.textContent = content;
 
     card.appendChild(header);
     card.appendChild(body);
@@ -331,7 +332,6 @@
     });
   }
 
-  // 検索結果行を安全に組み立てるヘルパー
   function buildSearchRow(r) {
     const tr = document.createElement('tr');
     const t1 = document.createElement('td'); t1.textContent = r.sid;
@@ -342,7 +342,6 @@
     return tr;
   }
 
-  // 横断検索（旧 text と 新 body の両方を検索対象に）
   document.getElementById('global-search-btn').onclick = async () => {
     const query = document.getElementById('global-search-input').value.toLowerCase().trim();
     if (!query) return;
@@ -390,22 +389,23 @@
     document.getElementById('search-results-area').classList.add('hidden');
   };
 
-  // 既読切替（read 項目のみ更新）
   window.toggleQ = (key, val) => update(ref(db, `questions/${viewingSessionId}/${key}`), { read: val });
 
   document.getElementById('start-lecture-btn').onclick = async () => {
     if (!viewingSessionId) return alert("回を選択してください。");
     const title = document.getElementById('current-display-label').textContent;
-    // title が確実に入っていることを保証してから書き込み（学生側 undefined 表示防止）
     if (!title || title === "科目を選択してください") {
       return alert("回を選択してから開始してください。");
     }
+    const now = Date.now();
     await set(ref(db, 'active_session'), {
       id: viewingSessionId,
       title: title,
-      isOpen: true
+      isOpen: true,
+      startedAt: now,
+      expiresAt: now + LECTURE_DURATION_MS
     });
-    alert("講義を開始しました。");
+    alert(`講義を開始しました。\n（${LECTURE_DURATION_MS / 60000}分後に自動終了します）`);
   };
 
   document.getElementById('end-lecture-btn').onclick = async () => {
@@ -415,7 +415,6 @@
     }
   };
 
-  // CSV出力（案B：1学生1行、質問は " / " 区切りで結合）
   document.getElementById('export-csv-btn').onclick = async () => {
     const [attSnap, qSnap] = await Promise.all([
       get(ref(db, `attendance/${viewingSessionId}`)),
