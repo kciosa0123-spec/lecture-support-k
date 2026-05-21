@@ -345,27 +345,57 @@
     return tr;
   }
 
-  document.getElementById('global-search-btn').onclick = async () => {
-    const query = document.getElementById('global-search-input').value.toLowerCase().trim();
-    if (!query) return;
+document.getElementById('global-search-btn').onclick = async () => {
+    const rawQuery = document.getElementById('global-search-input').value.trim();
+    if (!rawQuery) return;
+    
+    // ✨ 新設: 全角英数字を半角にし、ハイフンやスペース等の記号を全て消し去る関数
+    const clean = (str) => {
+      return String(str || "")
+        .replace(/[Ａ-Ｚａ-ｚ０-９]/g, m => String.fromCharCode(m.charCodeAt(0) - 0xFEE0)) // 全角→半角統一
+        .toLowerCase() // 大文字小文字統一
+        .replace(/[-_ 　]/g, ""); // ハイフン、アンダーバー、半角・全角スペースを完全除去
+    };
+
+    const query = clean(rawQuery); // 検索ワードをデトックス
     const btn = document.getElementById('global-search-btn');
     btn.textContent = "中..."; btn.disabled = true;
+    
     try {
       const [as, qs] = await Promise.all([get(ref(db, 'attendance')), get(ref(db, 'questions'))]);
       const results = [];
       const ad = as.val() || {};
       const qd = qs.val() || {};
+      
+      // ① 出席データの検索
       Object.keys(ad).forEach(sid => Object.keys(ad[sid]).forEach(uid => {
         const a = ad[sid][uid];
-        const comb = ((a.studentId || "") + (a.name || "") + (a.email || "")).toLowerCase();
-        if (comb.includes(query)) results.push({ sid, type: "出席", person: `${a.studentId} / ${a.name || '-'}`, content: "---", time: a.timestamp });
+        // データベース側のデータも同じルールで綺麗にして結合する
+        const comb = clean(a.studentId) + clean(a.name) + clean(a.email);
+        
+        if (comb.includes(query)) {
+          results.push({ sid, type: "出席", person: `${a.studentId} / ${a.name || '-'}`, content: "---", time: a.timestamp });
+        }
       }));
+      
+      // ② 質問データの検索
       Object.keys(qd).forEach(sid => Object.keys(qd[sid]).forEach(qid => {
         const q = qd[sid][qid];
         const content = q.body || q.text || "";
-        const comb = ((q.name || "") + (q.studentId || "") + (q.email || "") + content).toLowerCase();
-        if (comb.includes(query)) results.push({ sid, type: "質問", person: q.name || q.email, content: content, time: q.timestamp });
+        // 質問内容も含めてデトックス結合
+        const comb = clean(q.studentId) + clean(q.name) + clean(q.email) + clean(content);
+        
+        if (comb.includes(query)) {
+          let displayPerson = q.email || "";
+          if (q.studentId && q.name) {
+            displayPerson = `${String(q.studentId).toUpperCase()} / ${q.name}`;
+          } else if (q.name) {
+            displayPerson = q.name;
+          }
+          results.push({ sid, type: "質問", person: displayPerson, content: content, time: q.timestamp });
+        }
       }));
+      
       results.sort((a, b) => b.time - a.time);
 
       const body = document.getElementById('search-results-body');
@@ -373,7 +403,7 @@
       if (results.length === 0) {
         const tr = document.createElement('tr');
         const td = document.createElement('td');
-        td.colSpan = 4; td.textContent = "なし";
+        td.colSpan = 4; td.textContent = "該当データなし";
         tr.appendChild(td); body.appendChild(tr);
       } else {
         results.forEach(r => body.appendChild(buildSearchRow(r)));
@@ -386,7 +416,7 @@
       btn.textContent = "検索"; btn.disabled = false;
     }
   };
-
+  
   document.getElementById('clear-search-btn').onclick = () => {
     document.getElementById('global-search-input').value = "";
     document.getElementById('search-results-area').classList.add('hidden');
