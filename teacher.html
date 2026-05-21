@@ -2,9 +2,6 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
   <title>近大・講義支援ダッシュボード</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #f4f7f6; line-height: 1.6; }
@@ -227,7 +224,7 @@
     document.querySelectorAll('.session-btn').forEach(el => el.classList.remove('selected'));
     btn.classList.add('selected');
     document.getElementById('current-display-label').textContent = `${dName}曜${p}限：${sub} 【第${num}回】${dLabel}`;
-    document.getElementById('data-actions').toggle('hidden', !btn.classList.contains('has-data'));
+    document.getElementById('data-actions').classList.toggle('hidden', !btn.classList.contains('has-data'));
     updateStartButtonState();
 
     off(ref(db, `attendance/${viewingSessionId}`));
@@ -335,79 +332,37 @@
     });
   }
 
-  // ✨ 修正: 検索結果を出力するパーツ（ここで長いセッションIDや undefined を綺麗に整形して出力します）
   function buildSearchRow(r) {
     const tr = document.createElement('tr');
-    
-    // 講義名（セッションIDの長い文字列から日付以降を綺麗に抽出してスッキリさせる）
-    const t1 = document.createElement('td'); 
-    t1.textContent = r.sid ? r.sid.replace(/^\d{8}_/, "") : "";
-    
-    const t2 = document.createElement('td'); 
-    t2.textContent = r.type;
-    
-    // 対象（undefined や空文字を徹底ガードし、未入力なら --- を出す）
-    const t3 = document.createElement('td'); 
-    t3.textContent = (r.person && r.person !== "undefined" && r.person !== "未入力 / 名前なし") ? r.person : "---";
-    
-    const t4 = document.createElement('td'); 
-    t4.textContent = r.content;
-    
+    const t1 = document.createElement('td'); t1.textContent = r.sid;
+    const t2 = document.createElement('td'); t2.textContent = r.type;
+    const t3 = document.createElement('td'); t3.textContent = r.person;
+    const t4 = document.createElement('td'); t4.textContent = r.content;
     tr.appendChild(t1); tr.appendChild(t2); tr.appendChild(t3); tr.appendChild(t4);
     return tr;
   }
 
   document.getElementById('global-search-btn').onclick = async () => {
-    const rawQuery = document.getElementById('global-search-input').value.trim();
-    if (!rawQuery) return;
-    
-    // ✨ 全角英数字を半角にし、ハイフンやスペース等の記号を全て消し去る関数
-    const clean = (str) => {
-      return String(str || "")
-        .replace(/[Ａ-Ｚａ-ｚ０-９]/g, m => String.fromCharCode(m.charCodeAt(0) - 0xFEE0)) // 全角→半角統一
-        .toLowerCase() // 大文字小文字統一
-        .replace(/[-_ 　]/g, ""); // ハイフン、アンダーバー、半角・全角スペースを完全除去
-    };
-
-    const query = clean(rawQuery); // 検索ワードをデトックス
+    const query = document.getElementById('global-search-input').value.toLowerCase().trim();
+    if (!query) return;
     const btn = document.getElementById('global-search-btn');
     btn.textContent = "中..."; btn.disabled = true;
-    
     try {
       const [as, qs] = await Promise.all([get(ref(db, 'attendance')), get(ref(db, 'questions'))]);
       const results = [];
       const ad = as.val() || {};
       const qd = qs.val() || {};
-      
-      // ① 出席データの検索
       Object.keys(ad).forEach(sid => Object.keys(ad[sid]).forEach(uid => {
         const a = ad[sid][uid];
-        // データベース側のデータも同じルールで綺麗にして結合する
-        const comb = clean(a.studentId) + clean(a.name) + clean(a.email);
-        
-        if (comb.includes(query)) {
-          results.push({ sid, type: "出席", person: `${a.studentId} / ${a.name || '-'}`, content: "---", time: a.timestamp });
-        }
+        const comb = ((a.studentId || "") + (a.name || "") + (a.email || "")).toLowerCase();
+        if (comb.includes(query)) results.push({ sid, type: "出席", person: `${a.studentId} / ${a.name || '-'}`, content: "---", time: a.timestamp });
       }));
-      
-      // ② 質問データの検索
       Object.keys(qd).forEach(sid => Object.keys(qd[sid]).forEach(qid => {
         const q = qd[sid][qid];
         const content = q.body || q.text || "";
-        // 質問内容も含めてデトックス結合
-        const comb = clean(q.studentId) + clean(q.name) + clean(q.email) + clean(content);
-        
-        if (comb.includes(query)) {
-          let displayPerson = q.email || "";
-          if (q.studentId && q.name) {
-            displayPerson = `${String(q.studentId).toUpperCase()} / ${q.name}`;
-          } else if (q.name) {
-            displayPerson = q.name;
-          }
-          results.push({ sid, type: "質問", person: displayPerson, content: content, time: q.timestamp });
-        }
+        const comb = ((q.name || "") + (q.studentId || "") + (q.email || "") + content).toLowerCase();
+        if (comb.includes(query)) results.push({ sid, type: "質問", person: q.name || q.email, content: content, time: q.timestamp });
       }));
-      
       results.sort((a, b) => b.time - a.time);
 
       const body = document.getElementById('search-results-body');
@@ -415,7 +370,7 @@
       if (results.length === 0) {
         const tr = document.createElement('tr');
         const td = document.createElement('td');
-        td.colSpan = 4; td.textContent = "該当データなし";
+        td.colSpan = 4; td.textContent = "なし";
         tr.appendChild(td); body.appendChild(tr);
       } else {
         results.forEach(r => body.appendChild(buildSearchRow(r)));
@@ -428,7 +383,7 @@
       btn.textContent = "検索"; btn.disabled = false;
     }
   };
-  
+
   document.getElementById('clear-search-btn').onclick = () => {
     document.getElementById('global-search-input').value = "";
     document.getElementById('search-results-area').classList.add('hidden');
@@ -495,7 +450,7 @@
 
     let csv = "\uFEFF学籍番号,氏名,出席時刻,質問内容\n";
     list.forEach(e => {
-      const sid = e.timestamp ? String(e.studentId).toUpperCase() : "";
+      const sid = e.studentId ? String(e.studentId).toUpperCase() : "";
       const questions = (qByUid[e.uid] && qByUid[e.uid].length)
         ? qByUid[e.uid]
         : (qByStudentId[sid] || []);
