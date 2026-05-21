@@ -227,7 +227,7 @@
     document.querySelectorAll('.session-btn').forEach(el => el.classList.remove('selected'));
     btn.classList.add('selected');
     document.getElementById('current-display-label').textContent = `${dName}曜${p}限：${sub} 【第${num}回】${dLabel}`;
-    document.getElementById('data-actions').classList.toggle('hidden', !btn.classList.contains('has-data'));
+    document.getElementById('data-actions').toggle('hidden', !btn.classList.contains('has-data'));
     updateStartButtonState();
 
     off(ref(db, `attendance/${viewingSessionId}`));
@@ -335,21 +335,33 @@
     });
   }
 
+  // ✨ 修正: 検索結果を出力するパーツ（ここで長いセッションIDや undefined を綺麗に整形して出力します）
   function buildSearchRow(r) {
     const tr = document.createElement('tr');
-    const t1 = document.createElement('td'); t1.textContent = r.sid;
-    const t2 = document.createElement('td'); t2.textContent = r.type;
-    const t3 = document.createElement('td'); t3.textContent = r.person;
-    const t4 = document.createElement('td'); t4.textContent = r.content;
+    
+    // 講義名（セッションIDの長い文字列から日付以降を綺麗に抽出してスッキリさせる）
+    const t1 = document.createElement('td'); 
+    t1.textContent = r.sid ? r.sid.replace(/^\d{8}_/, "") : "";
+    
+    const t2 = document.createElement('td'); 
+    t2.textContent = r.type;
+    
+    // 対象（undefined や空文字を徹底ガードし、未入力なら --- を出す）
+    const t3 = document.createElement('td'); 
+    t3.textContent = (r.person && r.person !== "undefined" && r.person !== "未入力 / 名前なし") ? r.person : "---";
+    
+    const t4 = document.createElement('td'); 
+    t4.textContent = r.content;
+    
     tr.appendChild(t1); tr.appendChild(t2); tr.appendChild(t3); tr.appendChild(t4);
     return tr;
   }
 
-document.getElementById('global-search-btn').onclick = async () => {
+  document.getElementById('global-search-btn').onclick = async () => {
     const rawQuery = document.getElementById('global-search-input').value.trim();
     if (!rawQuery) return;
     
-    // ✨ 新設: 全角英数字を半角にし、ハイフンやスペース等の記号を全て消し去る関数
+    // ✨ 全角英数字を半角にし、ハイフンやスペース等の記号を全て消し去る関数
     const clean = (str) => {
       return String(str || "")
         .replace(/[Ａ-Ｚａ-ｚ０-９]/g, m => String.fromCharCode(m.charCodeAt(0) - 0xFEE0)) // 全角→半角統一
@@ -483,7 +495,7 @@ document.getElementById('global-search-btn').onclick = async () => {
 
     let csv = "\uFEFF学籍番号,氏名,出席時刻,質問内容\n";
     list.forEach(e => {
-      const sid = e.studentId ? String(e.studentId).toUpperCase() : "";
+      const sid = e.timestamp ? String(e.studentId).toUpperCase() : "";
       const questions = (qByUid[e.uid] && qByUid[e.uid].length)
         ? qByUid[e.uid]
         : (qByStudentId[sid] || []);
