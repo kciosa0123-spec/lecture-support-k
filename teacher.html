@@ -139,7 +139,7 @@
   provider.setCustomParameters({ prompt: 'select_account' });
 
   const ADMINS = ["0499b1@waka.kindai.ac.jp", "ng_osada@nara.kindai.ac.jp"];
-  const LECTURE_DURATION_MS = 110 * 60 * 1000; // 自動終了までの時間（110分）
+  const LECTURE_DURATION_MS = 110 * 60 * 1000;
   const timetable = {
     wed: { 2: "理系英語１", 3: "理系英語１", 4: "理系英語１" },
     thu: { 1: "英語３", 3: "英語３", 4: "英語３" }
@@ -148,6 +148,18 @@
   let viewingSessionId = "";
   let activeSessionId = "";
 
+  // ✅ 修正1: リスナーをモジュールスコープで管理し、確実に解除できるようにする
+  let attListener = null;
+  let attListenerRef = null;
+  let qListener = null;
+  let qListenerRef = null;
+
+  function detachListeners() {
+    if (attListenerRef && attListener) { off(attListenerRef, attListener); attListener = null; attListenerRef = null; }
+    if (qListenerRef   && qListener)   { off(qListenerRef,   qListener);   qListener   = null; qListenerRef   = null; }
+  }
+
+  // 時間割グリッドを構築
   Object.keys(timetable).forEach(day => {
     const container = document.getElementById(`subjects-${day}`);
     for (let p = 1; p <= 4; p++) {
@@ -182,14 +194,30 @@
     if (!isAlreadyOpen) { targetGrid.style.display = 'grid'; btn.classList.add('active'); scanDataPresence(day, sub, p); }
   };
 
+  // ✅ 修正2: Firebase REST API の shallow=true でキー名のみ取得（全件取得を廃止）
   async function scanDataPresence(day, sub, p) {
-    const snap = await get(ref(db, 'attendance'));
-    const allAtt = snap.val() || {};
-    const dName = { wed: "水", thu: "木" }[day];
-    for (let i = 1; i <= 15; i++) {
-      const found = Object.keys(allAtt).find(id => id.includes(`${dName}${p}`) && id.includes(sub) && id.includes(`第${i}回`));
-      const btn = document.getElementById(`btn-${day}-${p}-${i}`);
-      if (found) { btn.classList.add('has-data'); btn.dataset.actualId = found; }
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+      const token = await user.getIdToken();
+      const res = await fetch(
+        `https://lecture-support-kindai-default-rtdb.firebaseio.com/attendance.json?shallow=true&auth=${token}`
+      );
+      if (!res.ok) return;
+      const keys = await res.json();
+      if (!keys) return;
+
+      const dName = { wed: "水", thu: "木" }[day];
+      for (let i = 1; i <= 15; i++) {
+        const btn = document.getElementById(`btn-${day}-${p}-${i}`);
+        if (btn.dataset.actualId) continue;
+        const found = Object.keys(keys).find(id =>
+          id.includes(`${dName}${p}`) && id.includes(sub) && id.includes(`第${i}回`)
+        );
+        if (found) { btn.classList.add('has-data'); btn.dataset.actualId = found; }
+      }
+    } catch (e) {
+      console.warn("scanDataPresence failed:", e);
     }
   }
 
@@ -217,6 +245,9 @@
     const now = new Date();
     const dStr = now.toISOString().slice(0, 10).replace(/-/g, "");
     const id = btn.dataset.actualId || `${dStr}_${dName}${p}${sub}第${num}回`;
+
+    // ✅ 修正1: viewingSessionId を更新する前に古いリスナーを解除
+    detachListeners();
     viewingSessionId = id;
 
     let dLabel = "";
@@ -229,9 +260,6 @@
     document.getElementById('current-display-label').textContent = `${dName}曜${p}限：${sub} 【第${num}回】${dLabel}`;
     document.getElementById('data-actions').classList.toggle('hidden', !btn.classList.contains('has-data'));
     updateStartButtonState();
-
-    off(ref(db, `attendance/${viewingSessionId}`));
-    off(ref(db, `questions/${viewingSessionId}`));
     startMonitoring(id);
   };
 
@@ -309,11 +337,13 @@
     return card;
   }
 
-  function startMonitoring(sid) {
+  function startMonitoring(sessionId) {
     const attBody = document.getElementById('att-list-body');
     const qCont = document.getElementById('questions-container');
 
-    onValue(ref(db, `attendance/${sid}`), (s) => {
+    // ✅ 修正1: コールバックを変数に保持してからリスナー登録
+    attListenerRef = ref(db, `attendance/${sessionId}`);
+    attListener = onValue(attListenerRef, (s) => {
       const d = s.val() || {};
       const list = Object.values(d).sort((a, b) => (a.studentId || "").localeCompare(b.studentId || ""));
       document.getElementById('att-count').textContent = list.length;
@@ -321,7 +351,8 @@
       list.forEach(e => attBody.appendChild(buildAttendanceRow(e)));
     });
 
-    onValue(ref(db, `questions/${sid}`), (s) => {
+    qListenerRef = ref(db, `questions/${sessionId}`);
+    qListener = onValue(qListenerRef, (s) => {
       const d = s.val() || {};
       const keys = Object.keys(d).reverse();
       qCont.replaceChildren();
@@ -364,7 +395,8 @@
         const q = qd[sid][qid];
         const content = q.body || q.text || "";
         const comb = ((q.name || "") + (q.studentId || "") + (q.email || "") + content).toLowerCase();
-        if (comb.includes(query)) results.push({ sid, type: "質問", person: q.name || q.email, content: content, time: q.timestamp });
+        // ✅ 修正4（副次）: 検索結果の person 列を「studentId / name」形式に統一
+        if (comb.includes(query)) results.push({ sid, type: "質問", person: `${q.studentId || ''} / ${q.name || q.email || ''}`, content: content, time: q.timestamp });
       }));
       results.sort((a, b) => b.time - a.time);
 
@@ -400,6 +432,12 @@
     if (!title || title === "科目を選択してください") {
       return alert("回を選択してから開始してください。");
     }
+
+    // ✅ 修正3: 別の講義が進行中の場合は確認ダイアログを表示
+    if (activeSessionId && activeSessionId !== viewingSessionId) {
+      if (!confirm(`別の講義「${activeSessionId}」が進行中です。\nこの回に切り替えますか？`)) return;
+    }
+
     const now = Date.now();
     await set(ref(db, 'active_session'), {
       id: viewingSessionId,
@@ -426,20 +464,13 @@
     const attData = attSnap.val() || {};
     const qData = qSnap.val() || {};
 
+    // ✅ 修正4: uid のみで質問を紐付け、studentId フォールバックを廃止
     const qByUid = {};
-    const qByStudentId = {};
     Object.values(qData).forEach(q => {
       const content = (q.body || q.text || "").trim();
-      if (!content) return;
-      if (q.uid) {
-        if (!qByUid[q.uid]) qByUid[q.uid] = [];
-        qByUid[q.uid].push(content);
-      }
-      if (q.studentId) {
-        const sid = String(q.studentId).toUpperCase();
-        if (!qByStudentId[sid]) qByStudentId[sid] = [];
-        qByStudentId[sid].push(content);
-      }
+      if (!content || !q.uid) return;
+      if (!qByUid[q.uid]) qByUid[q.uid] = [];
+      qByUid[q.uid].push(content);
     });
 
     const list = Object.entries(attData)
@@ -453,10 +484,7 @@
 
     let csv = "\uFEFF学籍番号,氏名,出席時刻,質問内容\n";
     list.forEach(e => {
-      const sid = e.studentId ? String(e.studentId).toUpperCase() : "";
-      const questions = (qByUid[e.uid] && qByUid[e.uid].length)
-        ? qByUid[e.uid]
-        : (qByStudentId[sid] || []);
+      const questions = qByUid[e.uid] || [];
       const combined = questions.join(" / ");
       const timeStr = e.timestamp ? new Date(e.timestamp).toLocaleString() : "";
       csv += `${esc(e.studentId)},${esc(e.name)},${esc(timeStr)},${esc(combined)}\n`;
@@ -471,6 +499,8 @@
 
   document.getElementById('delete-btn').onclick = async () => {
     if (confirm("この回のデータを完全に削除しますか？")) {
+      // ✅ 修正5: 削除前にリスナーを解除
+      detachListeners();
       await Promise.all([
         remove(ref(db, `attendance/${viewingSessionId}`)),
         remove(ref(db, `questions/${viewingSessionId}`))
