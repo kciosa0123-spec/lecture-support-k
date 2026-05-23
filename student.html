@@ -8,25 +8,36 @@
   <meta http-equiv="Expires" content="0">
   <title>近大・講義支援ツール（画面スッキリ版）</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; background: #f0f2f5; line-height: 1.5; }
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; background: #f0f2f5; line-height: 1.5; }
     .box { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }
-    h1 { font-size: 1.2rem; color: #c00; margin-top: 0; text-align: center; }
+    
+    /* 変更: h1のテキストカラーをレッドからブルー(#1a73e8)に変更 */
+    h1 { font-size: 1.2rem; color: #1a73e8; margin-top: 0; text-align: center; }
+    
     label { font-size: 0.85rem; color: #555; font-weight: bold; display: block; margin-bottom: 5px; }
     input, textarea { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 16px; }
     input:disabled { background: #f9f9f9; color: #888; cursor: not-allowed; border-color: #eee; }
     button { width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 16px; transition: 0.3s; }
+    
     #attendance-btn { background: #34a853; color: white; }
     #attendance-btn:disabled { background: #ccc; cursor: not-allowed; }
+    
+    /* 送信ボタンのカラーは鮮やかなブルー(#1a73e8)を維持 */
     #send-btn { background: #1a73e8; color: white; }
+    
     .status-msg { font-size: 0.85rem; text-align: center; color: #d93025; margin-top: 5px; min-height: 1.2rem; }
-    .profile-box { background: #fffbe6; border: 1px solid #ffe58f; }
+    
+    /* 変更: セッション情報（待機中など）の帯カラーをレッド系から鮮やかな薄いブルー系に変更 */
+    #session-info { background: #e8f0fe; color: #1967d2; padding: 12px; border-radius: 6px; font-weight: bold; margin-bottom: 20px; text-align: center; font-size: 0.9rem; border: 1px solid #d2e3fc; }
+    
     .hidden { display: none; }
+    .profile-box { background: #fffbe6; border: 1px solid #ffe58f; }
   </style>
 </head>
 <body>
 
 <div id="login-section" class="box" style="text-align: center; padding: 40px 20px;">
-  <h1 style="color: #c00;">Kindai University<br>講義支援ツール</h1>
+  <h1>Kindai University<br>講義支援ツール</h1>
   <button id="login-btn" style="background: white; color: #444; border: 1px solid #ddd; display: flex; align-items: center; justify-content: center; gap: 10px; margin: 0 auto; padding: 10px 20px; width: auto;">
     <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18"> Googleでログイン
   </button>
@@ -34,7 +45,7 @@
 </div>
 
 <div id="main-section" class="hidden">
-  <div id="session-info" style="background: #fee; color: #c00; padding: 12px; border-radius: 6px; font-weight: bold; margin-bottom: 20px; text-align: center; font-size: 0.9rem; border: 1px solid #fcc;">講義開始を待っています...</div>
+  <div id="session-info">講義開始を待っています...</div>
 
   <div class="box profile-box" id="profile-ui">
     <p style="font-size: 0.8rem; color: #856404; margin-top:0;">初回のみ入力（次回から保存されます）</p>
@@ -55,6 +66,11 @@
       <textarea id="question-text" rows="3" placeholder="メッセージを入力"></textarea>
       <button id="send-btn">送信 (Send)</button>
       <p id="send-status" class="status-msg" style="color: #34a853;"></p>
+
+      <div id="my-questions-container" class="hidden" style="margin-top: 15px; border-top: 1px dashed #ccc; padding-top: 10px;">
+        <p style="font-size: 11px; color: #666; margin-bottom: 8px;">送信したメッセージ</p>
+        <div id="my-questions-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+      </div>
     </div>
   </div>
 
@@ -147,7 +163,7 @@
         currentSessionId = null;
         areaEl.classList.add('hidden');
         setLock(false);
-        document.getElementById('question-section').classList.add('hidden'); // 講義終了時は質問欄も隠す
+        document.getElementById('question-section').classList.add('hidden');
         if (wasInLecture) {
           showLectureEndedMessage();
           wasInLecture = false;
@@ -178,7 +194,6 @@
     }, 30 * 1000);
   }
 
-  // ✨ 改善ポイント: 出席の成否に完全に連動して、質問エリアの表示状態をリアルタイム制御します
   async function checkAttendanceStatus() {
     if (!currentSessionId || !currentUser) return;
     const snap = await get(ref(db, `attendance/${currentSessionId}/${currentUser.uid}`));
@@ -188,12 +203,12 @@
       btn.textContent = "出席報告済み (Submitted)";
       btn.disabled = true;
       setLock(true);
-      qSection.classList.remove('hidden'); // 💡 出席確認完了で、メッセージ入力欄をシュッと表示！
+      qSection.classList.remove('hidden');
     } else {
       btn.textContent = "出席 (Attendance) を報告";
       btn.disabled = false;
       setLock(false);
-      qSection.classList.add('hidden');    // 💡 未出席なら、メッセージ入力欄を物理的に隠蔽！
+      qSection.classList.add('hidden');
     }
   }
 
@@ -206,20 +221,20 @@
 
   document.getElementById('attendance-btn').onclick = async () => {
     const btn = document.getElementById('attendance-btn');
-    if (btn.disabled) return;     // 二度押し防止ガード
-    btn.disabled = true;           // 押した瞬間に即時フリーズ
+    if (btn.disabled) return;
+    btn.disabled = true;
 
     let sid = document.getElementById('student-id').value.trim().toUpperCase();
     let sname = document.getElementById('student-name').value.trim();
     if (!sid || !sname) {
-      btn.disabled = false;        // バリデーション失敗時はボタンを復帰
+      btn.disabled = false;
       return alert("学籍番号と氏名を入力してください。");
     }
 
     sname = sname.replace(/[\s ]+/g, ' ');
     if (!sname.includes(' ')) {
       if (!confirm("苗字と名前の間にスペースがありません。よろしいですか？（例：近大 太郎）")) {
-        btn.disabled = false;      // キャンセル時はボタンを復帰
+        btn.disabled = false;
         return;
       }
     }
@@ -238,18 +253,18 @@
       alert("出席を報告しました。");
     } catch (e) {
       console.error(e);
-      // エラー発生時、ルールによる拒否（すでに裏で1回目が成功しているか）を検証
       const snap = await get(ref(db, `attendance/${currentSessionId}/${currentUser.uid}`));
       if (snap.exists()) {
-        checkAttendanceStatus();   // 画面を正常な「出席済み」に同期
+        checkAttendanceStatus();
         alert("出席は既に記録されています。ご安心ください。");
       } else {
-        btn.disabled = false;      // 本当に通信・サーバーエラーで失敗した場合のみ再試行を許可
+        btn.disabled = false;
         alert("エラー: 送信できませんでした。もう一度お試しください。");
       }
     }
   };
 
+  // 質問・メッセージ送信処理（教員の確認ステータスをリアルタイム監視する新機能）
   document.getElementById('send-btn').onclick = async () => {
     const bodyText = document.getElementById('question-text').value.trim();
     if (!bodyText || !currentSessionId) return;
@@ -258,7 +273,11 @@
     const sname = document.getElementById('student-name').value.trim();
 
     try {
-      await push(ref(db, `questions/${currentSessionId}`), {
+      // 新しい質問データの参照（箱）を先に作る
+      const newQuestionRef = push(ref(db, `questions/${currentSessionId}`));
+      
+      // 作った箱にデータを保存
+      await set(newQuestionRef, {
         uid: currentUser.uid,
         email: currentUser.email,
         studentId: sid || "未入力",
@@ -273,6 +292,43 @@
       status.textContent = "送信完了！";
       status.style.color = "#34a853";
       setTimeout(() => { status.textContent = ""; }, 3000);
+
+      // 送信履歴を画面に表示し、リアルタイム監視を開始
+      document.getElementById('my-questions-container').classList.remove('hidden');
+      const qList = document.getElementById('my-questions-list');
+      
+      const qCard = document.createElement('div');
+      qCard.style.background = '#f8f9fa';
+      qCard.style.border = '1px solid #ddd';
+      qCard.style.padding = '10px';
+      qCard.style.borderRadius = '8px';
+      qCard.style.fontSize = '14px';
+      qCard.style.textAlign = 'left';
+      
+      const qBody = document.createElement('div');
+      qBody.textContent = bodyText;
+      qCard.appendChild(qBody);
+      
+      const qStatus = document.createElement('div');
+      qStatus.style.fontSize = '11px';
+      qStatus.style.marginTop = '6px';
+      qStatus.style.fontWeight = 'bold';
+      qStatus.style.color = '#888';
+      qStatus.textContent = "⏳ 教員の確認待ち...";
+      qCard.appendChild(qStatus);
+      
+      qList.prepend(qCard); // 一番上に追加
+
+      // 先生が「済」ボタンを押した瞬間を監視
+      onValue(newQuestionRef, (snap) => {
+        const data = snap.val();
+        if (data && data.read === true) {
+          qStatus.textContent = "✅ 教員が確認しました";
+          qStatus.style.color = "#34a853";
+          qCard.style.background = "#e6f4ea"; // 確認済みは薄い緑色に変化
+          qCard.style.borderColor = "#c6e1d0";
+        }
+      });
 
     } catch (e) {
       console.error(e);
