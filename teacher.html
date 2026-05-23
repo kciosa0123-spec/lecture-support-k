@@ -148,7 +148,6 @@
   let viewingSessionId = "";
   let activeSessionId = "";
 
-  // ✅ 修正1: リスナーをモジュールスコープで管理し、確実に解除できるようにする
   let attListener = null;
   let attListenerRef = null;
   let qListener = null;
@@ -194,7 +193,6 @@
     if (!isAlreadyOpen) { targetGrid.style.display = 'grid'; btn.classList.add('active'); scanDataPresence(day, sub, p); }
   };
 
-  // ✅ 修正2: Firebase REST API の shallow=true でキー名のみ取得（全件取得を廃止）
   async function scanDataPresence(day, sub, p) {
     try {
       const user = auth.currentUser;
@@ -246,7 +244,6 @@
     const dStr = now.toISOString().slice(0, 10).replace(/-/g, "");
     const id = btn.dataset.actualId || `${dStr}_${dName}${p}${sub}第${num}回`;
 
-    // ✅ 修正1: viewingSessionId を更新する前に古いリスナーを解除
     detachListeners();
     viewingSessionId = id;
 
@@ -284,7 +281,6 @@
       document.getElementById('user-info').textContent = u.email;
       onValue(ref(db, 'active_session'), async (s) => {
         const v = s.val();
-        // 期限切れの自動クリーンアップ
         if (v && v.expiresAt && Date.now() > v.expiresAt) {
           console.log("期限切れの講義を自動終了します:", v.id);
           await remove(ref(db, 'active_session'));
@@ -330,7 +326,10 @@
     const toggleBtn = document.createElement('button');
     toggleBtn.className = `q-toggle ${isRead ? 'read' : 'unread'}`;
     toggleBtn.textContent = isRead ? '済' : '未';
-    toggleBtn.onclick = () => window.toggleQ(key, !isRead);
+    
+    // 👇 ここがエラーを防止する修正ポイント（直接データベースを更新する）
+    toggleBtn.onclick = () => update(ref(db, `questions/${viewingSessionId}/${key}`), { read: !isRead });
+    
     header.appendChild(toggleBtn);
 
     const body = document.createElement('div');
@@ -346,7 +345,6 @@
     const attBody = document.getElementById('att-list-body');
     const qCont = document.getElementById('questions-container');
 
-    // ✅ 修正1: コールバックを変数に保持してからリスナー登録
     attListenerRef = ref(db, `attendance/${sessionId}`);
     attListener = onValue(attListenerRef, (s) => {
       const d = s.val() || {};
@@ -400,7 +398,6 @@
         const q = qd[sid][qid];
         const content = q.body || q.text || "";
         const comb = ((q.name || "") + (q.studentId || "") + (q.email || "") + content).toLowerCase();
-        // ✅ 修正4（副次）: 検索結果の person 列を「studentId / name」形式に統一
         if (comb.includes(query)) results.push({ sid, type: "質問", person: `${q.studentId || ''} / ${q.name || q.email || ''}`, content: content, time: q.timestamp });
       }));
       results.sort((a, b) => b.time - a.time);
@@ -429,8 +426,6 @@
     document.getElementById('search-results-area').classList.add('hidden');
   };
 
-  window.toggleQ = (key, val) => update(ref(db, `questions/${viewingSessionId}/${key}`), { read: val });
-
   document.getElementById('start-lecture-btn').onclick = async () => {
     if (!viewingSessionId) return alert("回を選択してください。");
     const title = document.getElementById('current-display-label').textContent;
@@ -438,7 +433,6 @@
       return alert("回を選択してから開始してください。");
     }
 
-    // ✅ 修正3: 別の講義が進行中の場合は確認ダイアログを表示
     if (activeSessionId && activeSessionId !== viewingSessionId) {
       if (!confirm(`別の講義「${activeSessionId}」が進行中です。\nこの回に切り替えますか？`)) return;
     }
@@ -469,7 +463,6 @@
     const attData = attSnap.val() || {};
     const qData = qSnap.val() || {};
 
-    // ✅ 修正4: uid のみで質問を紐付け、studentId フォールバックを廃止
     const qByUid = {};
     Object.values(qData).forEach(q => {
       const content = (q.body || q.text || "").trim();
@@ -504,7 +497,6 @@
 
   document.getElementById('delete-btn').onclick = async () => {
     if (confirm("この回のデータを完全に削除しますか？")) {
-      // ✅ 修正5: 削除前にリスナーを解除
       detachListeners();
       await Promise.all([
         remove(ref(db, `attendance/${viewingSessionId}`)),
