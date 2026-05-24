@@ -35,6 +35,11 @@
 </div>
 
 <div id="main-section" class="hidden">
+
+  <div id="offline-warning" class="hidden" style="background: #ea4335; color: white; padding: 12px; border-radius: 8px; font-weight: bold; margin-bottom: 20px; text-align: center; font-size: 0.9rem; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">
+    ⚠️ ネットワーク接続が切れています。<br>通信環境を確認してください。
+  </div>
+
   <div id="session-info">講義開始を待っています...</div>
 
   <div class="box profile-box" id="profile-ui">
@@ -102,13 +107,30 @@
   let wasInLecture = false;
   let endedMessageTimer = null;
   let expiryWatcherStarted = false;
-
   let questionUnsubscribers = [];
+  
+  // ✨ 先生のアイデア：オフライン検知用の遅延タイマー変数
+  let offlineTimer = null;
 
   function detachQuestionListeners() {
     questionUnsubscribers.forEach(unsub => unsub());
     questionUnsubscribers = [];
   }
+
+  // ✨ 先生のアイデア：オフライン検知とチラつき防止ロジック
+  onValue(ref(db, '.info/connected'), (snap) => {
+    const offlineBanner = document.getElementById('offline-warning');
+    if (snap.val() === true) {
+      if (offlineTimer) { clearTimeout(offlineTimer); offlineTimer = null; }
+      offlineBanner.classList.add('hidden');
+    } else {
+      if (currentUser) {
+        offlineTimer = setTimeout(() => {
+          offlineBanner.classList.remove('hidden');
+        }, 3000);
+      }
+    }
+  });
 
   onAuthStateChanged(auth, (user) => {
     if (user && isAllowedEmail(user.email)) {
