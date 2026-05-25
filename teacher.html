@@ -64,6 +64,10 @@
 
   <h2 style="font-size: 1.2rem; margin: 5px 0 10px 0; color: #c00;">Kindai University 講義支援ツール</h2>
 
+  <div id="offline-warning" class="hidden" style="background: #ea4335; color: white; padding: 12px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; font-size: 13px; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">
+    ⚠️ ネットワーク接続が切れています。リアルタイム更新が停止しています。通信環境を確認してください。
+  </div>
+
   <div id="login-section" class="box" style="text-align: center; padding: 30px;">
     <button id="login-btn" type="button" class="btn-blue" style="font-size: 16px;">Googleでログイン</button>
   </div>
@@ -169,6 +173,7 @@
 
   let viewingSessionId = "";
   let activeSessionId = "";
+  let offlineTimer = null; 
 
   let attListener = null;
   let attListenerRef = null;
@@ -194,6 +199,23 @@
       toggleBtn.style.background = '#4285f4';
     }
   };
+
+  // 通信状態を監視（チラつき防止3秒タイマー付き）
+  onValue(ref(db, '.info/connected'), (snap) => {
+    const offlineBanner = document.getElementById('offline-warning');
+    if (snap.val() === true) {
+      if (offlineTimer) { clearTimeout(offlineTimer); offlineTimer = null; }
+      offlineBanner.classList.add('hidden');
+    } else {
+      if (auth.currentUser) {
+        if (!offlineTimer) {
+          offlineTimer = setTimeout(() => {
+            offlineBanner.classList.remove('hidden');
+          }, 3000);
+        }
+      }
+    }
+  });
 
   // 時間割グリッドを構築
   Object.keys(timetable).forEach(day => {
@@ -245,7 +267,7 @@
       const dName = { wed: "水", thu: "木" }[day];
       for (let i = 1; i <= 15; i++) {
         const btn = document.getElementById(`btn-${day}-${p}-${i}`);
-        if (btn.dataset.actualId) continue;
+        if (btn.dataset.actualId) continue; // continueで最適化
         const found = Object.keys(keys).find(id =>
           id.includes(`${dName}${p}`) && id.includes(sub) && id.includes(`第${i}回`)
         );
@@ -458,7 +480,7 @@
     } catch (e) {
       console.error(e);
       alert("検索に失敗しました。");
-    } finally {
+    } finally { // finallyに修正済み
       btn.textContent = "検索"; btn.disabled = false;
     }
   };
@@ -487,7 +509,7 @@
       startedAt: now,
       expiresAt: now + LECTURE_DURATION_MS
     });
-    alert(`講義を開始しました。\n（${LECTURE_DURATION_MS / 60000}分後に自動終了します）`);
+    alert(`講義を開始しました。`);
   };
 
   document.getElementById('end-lecture-btn').onclick = async () => {
