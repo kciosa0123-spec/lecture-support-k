@@ -125,9 +125,12 @@
       offlineBanner.classList.add('hidden');
     } else {
       if (currentUser) {
-        offlineTimer = setTimeout(() => {
-          offlineBanner.classList.remove('hidden');
-        }, 3000);
+        // 👇 この if (!offlineTimer) { を追加
+        if (!offlineTimer) {
+          offlineTimer = setTimeout(() => {
+            offlineBanner.classList.remove('hidden');
+          }, 3000);
+        } // 👈 この閉じカッコ } も忘れずに！
       }
     }
   });
