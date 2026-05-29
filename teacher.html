@@ -40,7 +40,7 @@
     .btn-secondary { background: #6c757d; }
     .btn-outline { background: #fff; color: #666; border: 1px solid #ccc; padding: 4px 8px; font-weight: normal; font-size: 11px; }
     .btn-outline.active { background: #666; color: #fff; border-color: #666; }
-    .hidden { display: none; }
+    .hidden { display: none !important; }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     th, td { text-align: left; padding: 6px; border-bottom: 1px solid #eee; }
     .q-header { font-size: 11px; color: #666; display: flex; justify-content: space-between; align-items: center; }
@@ -48,6 +48,14 @@
     .q-toggle { padding: 3px 8px; font-size: 11px; border-radius: 4px; border: none; cursor: pointer; }
     .q-toggle.read { background: #ccc; color: #fff; }
     .q-toggle.unread { background: #ffc107; color: #333; }
+
+    /* アラート用トランジション */
+    #reaction-panel { transition: background-color 0.4s ease, border-color 0.4s ease; }
+
+    /* 統計ボックス用CSS（未回答ボタンをクリック可能にする装飾） */
+    .stat-box { flex: 1; padding: 6px; background: white; border-radius: 6px; border: 1px solid #ddd; text-align: center; }
+    .stat-box.clickable { cursor: pointer; transition: 0.2s; position: relative; }
+    .stat-box.clickable:hover { background: #e9ecef; border-color: #adb5bd; transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
   </style>
 </head>
 <body>
@@ -107,6 +115,20 @@
     </div>
 
     <div class="box" style="padding: 10px;">
+
+      <div id="reaction-panel" class="hidden" style="background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 8px; padding: 10px; margin-bottom: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-weight: bold; font-size: 13px; color: #333;">📊 クラスの理解度（リアルタイム）</span>
+          <button id="reset-rxn-btn" class="btn-outline" style="font-size: 11px;">🔄 リセット</button>
+        </div>
+        <div style="display: flex; gap: 5px; font-size: 11px;">
+          <div id="stat-good" class="stat-box">👍 順調<br><b style="font-size:15px; color:#137333;">0</b></div>
+          <div id="stat-hard" class="stat-box">😓 難しい<br><b style="font-size:15px; color:#c5221f;">0</b></div>
+          <div id="stat-wait" class="stat-box">✋ 待って<br><b style="font-size:15px; color:#b06000;">0</b></div>
+          <div id="stat-none" class="stat-box clickable" title="クリックして未回答の学生一覧を表示">⚪️ 未回答<br><b style="font-size:15px;">0</b></div>
+        </div>
+      </div>
+
       <div style="display: flex; justify-content: space-between; margin-bottom: 8px; align-items: center;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 13px; font-weight: bold;">出席: <span id="att-count" style="color:#28a745; font-size:1.2em;">0</span> 名</span>
@@ -130,6 +152,15 @@
     <div style="text-align: right; margin-top: 15px;">
       <span id="user-info" style="font-size: 10px; color: #999; margin-right: 5px;"></span>
       <button id="logout-btn" class="btn-secondary" style="font-size: 10px; padding: 3px 8px;">ログアウト</button>
+    </div>
+  </div>
+
+  <div id="unanswered-modal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 20px; border-radius: 10px; width: 90%; max-width: 400px; max-height: 80vh; display: flex; flex-direction: column;">
+      <h3 style="margin-top: 0; color: #333; font-size: 16px;">⚪️ 未回答の学生一覧</h3>
+      <p style="font-size: 11px; color: #666; margin-top: -10px;">出席報告済みで、リアクションをまだ押していない学生です。</p>
+      <ul id="unanswered-list" style="list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; font-size: 13px; line-height: 1.8; border: 1px solid #eee; border-radius: 6px; padding: 10px; background: #f9f9f9;"></ul>
+      <button id="close-unanswered-modal" class="btn-secondary" style="width: 100%; padding: 10px; margin-top: 15px;">閉じる</button>
     </div>
   </div>
 
@@ -170,13 +201,25 @@
   let qListener = null;
   let qListenerRef = null;
 
-  // ✅ 修正3: active_session リスナーの多重登録防止
+  let rxnListenerRef = null;
+  let rxnListener = null;
+  let rawRxnData = {};
+
+  // 出席者の詳細データをローカルに保持（未回答者特定のため）
+  let currentAttData = {};
+  let currentAttCount = 0;
+
   let activeSessionListener = null;
   let activeSessionRef = null;
 
   function detachListeners() {
     if (attListenerRef && attListener) { off(attListenerRef, attListener); attListener = null; attListenerRef = null; }
     if (qListenerRef   && qListener)   { off(qListenerRef,   qListener);   qListener   = null; qListenerRef   = null; }
+    if (rxnListenerRef && rxnListener) { off(rxnListenerRef, rxnListener); rxnListener = null; rxnListenerRef = null; }
+    // 集計用ローカルデータも初期化（前の回のデータが残らないように）
+    rawRxnData = {};
+    currentAttData = {};
+    currentAttCount = 0;
   }
 
   // 時間割エリアの開閉トグル
@@ -336,7 +379,7 @@
       document.getElementById('dashboard-section').classList.remove('hidden');
       document.getElementById('user-info').textContent = u.email;
 
-      // ✅ 修正3: 既存リスナーを解除してから再登録
+      // active_session リスナーの多重登録防止
       if (activeSessionRef && activeSessionListener) {
         off(activeSessionRef, activeSessionListener);
       }
@@ -400,17 +443,61 @@
     return card;
   }
 
+  // 出席者の uid 集合を基準に集計する（出席者以外のリアクションは数えない）
+  function updateReactionSummary() {
+    let good = 0, hard = 0, wait = 0;
+    const attUids = Object.keys(currentAttData);
+
+    attUids.forEach(uid => {
+      const d = rawRxnData[uid];
+      if (!d) return;
+      if (d.status === 'good') good++;
+      else if (d.status === 'hard') hard++;
+      else if (d.status === 'wait') wait++;
+    });
+
+    const total = currentAttCount;
+    const reacted = good + hard + wait;
+    const none = Math.max(0, total - reacted);
+    const pct = (num) => total > 0 ? Math.round((num / total) * 100) : 0;
+
+    document.getElementById('stat-good').innerHTML = `👍 順調<br><b style="font-size:15px; color:#137333;">${good}</b> <span style="font-size:10px;">(${pct(good)}%)</span>`;
+    document.getElementById('stat-hard').innerHTML = `😓 難しい<br><b style="font-size:15px; color:#c5221f;">${hard}</b> <span style="font-size:10px;">(${pct(hard)}%)</span>`;
+    document.getElementById('stat-wait').innerHTML = `✋ 待って<br><b style="font-size:15px; color:#b06000;">${wait}</b> <span style="font-size:10px;">(${pct(wait)}%)</span>`;
+    document.getElementById('stat-none').innerHTML = `⚪️ 未回答<br><b style="font-size:15px;">${none}</b> <span style="font-size:10px;">(${pct(none)}%)</span>`;
+
+    const panel = document.getElementById('reaction-panel');
+    if (pct(hard) >= 20) {
+      panel.style.background = "#fce8e6"; panel.style.borderColor = "#f4c7c3";
+    } else if (pct(wait) >= 20) {
+      panel.style.background = "#fef7e0"; panel.style.borderColor = "#fbe9a4";
+    } else {
+      panel.style.background = "#f8f9fa"; panel.style.borderColor = "#e9ecef";
+    }
+  }
+
   function startMonitoring(sessionId) {
     const attBody = document.getElementById('att-list-body');
     const qCont = document.getElementById('questions-container');
 
+    document.getElementById('reaction-panel').classList.remove('hidden');
+
     attListenerRef = ref(db, `attendance/${sessionId}`);
     attListener = onValue(attListenerRef, (s) => {
       const d = s.val() || {};
+      currentAttData = d; // 未回答者特定のために保存
       const list = Object.values(d).sort((a, b) => (a.studentId || "").localeCompare(b.studentId || ""));
-      document.getElementById('att-count').textContent = list.length;
+      currentAttCount = list.length;
+      document.getElementById('att-count').textContent = currentAttCount;
       attBody.replaceChildren();
       list.forEach(e => attBody.appendChild(buildAttendanceRow(e)));
+      updateReactionSummary();
+    });
+
+    rxnListenerRef = ref(db, `reactions/${sessionId}`);
+    rxnListener = onValue(rxnListenerRef, (s) => {
+      rawRxnData = s.val() || {};
+      updateReactionSummary();
     });
 
     qListenerRef = ref(db, `questions/${sessionId}`);
@@ -429,6 +516,53 @@
       keys.forEach(k => qCont.appendChild(buildQuestionCard(k, d[k])));
     });
   }
+
+  // === 未回答者モーダルの制御ロジック ===
+  document.getElementById('stat-none').onclick = () => {
+    if (!viewingSessionId || currentAttCount === 0) return;
+
+    // 出席者のうち、リアクションデータが存在しない学生を抽出
+    const unreacted = [];
+    Object.values(currentAttData).forEach(st => {
+      if (st && st.uid && !rawRxnData[st.uid]) unreacted.push(st);
+    });
+
+    // 学籍番号順にソート
+    unreacted.sort((a, b) => (a.studentId || "").localeCompare(b.studentId || ""));
+
+    const listEl = document.getElementById('unanswered-list');
+    listEl.replaceChildren(); // リストを初期化
+
+    if (unreacted.length === 0) {
+      const li = document.createElement('li');
+      li.textContent = "未回答の学生はいません。全員がリアクションしています！";
+      li.style.color = "#28a745";
+      listEl.appendChild(li);
+    } else {
+      unreacted.forEach(st => {
+        const li = document.createElement('li');
+        li.style.borderBottom = "1px solid #e9ecef";
+        li.style.padding = "4px 0";
+        li.textContent = `${st.studentId || ''} ${st.name || ''}`.trim();
+        listEl.appendChild(li);
+      });
+    }
+
+    document.getElementById('unanswered-modal').classList.remove('hidden');
+  };
+
+  document.getElementById('close-unanswered-modal').onclick = () => {
+    document.getElementById('unanswered-modal').classList.add('hidden');
+  };
+  // ============================================
+
+  document.getElementById('reset-rxn-btn').onclick = async () => {
+    if (!viewingSessionId) return;
+    const label = document.getElementById('current-display-label').textContent;
+    if (confirm(`「${label}」の学生リアクションを全てリセット（未回答に戻す）しますか？`)) {
+      await remove(ref(db, `reactions/${viewingSessionId}`));
+    }
+  };
 
   function buildSearchRow(r) {
     const tr = document.createElement('tr');
@@ -515,12 +649,15 @@
   };
 
   document.getElementById('export-csv-btn').onclick = async () => {
-    const [attSnap, qSnap] = await Promise.all([
+    const [attSnap, qSnap, rxnSnap] = await Promise.all([
       get(ref(db, `attendance/${viewingSessionId}`)),
-      get(ref(db, `questions/${viewingSessionId}`))
+      get(ref(db, `questions/${viewingSessionId}`)),
+      get(ref(db, `reactions/${viewingSessionId}`))
     ]);
     const attData = attSnap.val() || {};
     const qData = qSnap.val() || {};
+    const rxnData = rxnSnap.val() || {};
+    const rxnLabels = { good: '順調', hard: '難しい', wait: '待って' };
 
     const qByUid = {};
     Object.values(qData).forEach(q => {
@@ -539,13 +676,13 @@
       return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
 
-    let csv = "\uFEFF学籍番号,氏名,出席時刻,質問内容\n";
+    let csv = "\uFEFF学籍番号,氏名,出席時刻,最終理解度,質問内容\n";
     list.forEach(e => {
       const questions = qByUid[e.uid] || [];
       const combined = questions.join(" / ");
-      // ✅ タイムゾーンを日本時間に明示（適用済み）
       const timeStr = e.timestamp ? new Date(e.timestamp).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : "";
-      csv += `${esc(e.studentId)},${esc(e.name)},${esc(timeStr)},${esc(combined)}\n`;
+      const rxnStatus = rxnData[e.uid] ? rxnLabels[rxnData[e.uid].status] : '未回答';
+      csv += `${esc(e.studentId)},${esc(e.name)},${esc(timeStr)},${esc(rxnStatus)},${esc(combined)}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -560,7 +697,8 @@
       detachListeners();
       await Promise.all([
         remove(ref(db, `attendance/${viewingSessionId}`)),
-        remove(ref(db, `questions/${viewingSessionId}`))
+        remove(ref(db, `questions/${viewingSessionId}`)),
+        remove(ref(db, `reactions/${viewingSessionId}`))
       ]);
       if (viewingSessionId === activeSessionId) await remove(ref(db, 'active_session'));
       location.reload();
