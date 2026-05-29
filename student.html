@@ -22,6 +22,13 @@
     #session-info { background: #e8f0fe; color: #1967d2; padding: 12px; border-radius: 6px; font-weight: bold; margin-bottom: 20px; text-align: center; font-size: 0.9rem; border: 1px solid #d2e3fc; }
     .hidden { display: none; }
     .profile-box { background: #fffbe6; border: 1px solid #ffe58f; }
+
+    /* リアクションボタン用CSS */
+    .rxn-row { display: flex; gap: 8px; margin-bottom: 15px; }
+    .rxn-btn { flex: 1; padding: 10px 5px; font-size: 13px; border: 2px solid #ddd; border-radius: 8px; background: #fff; color: #555; font-weight: bold; cursor: pointer; transition: 0.2s; text-align: center; }
+    .rxn-btn.active-good { border-color: #34a853; background: #e6f4ea; color: #137333; }
+    .rxn-btn.active-hard { border-color: #ea4335; background: #fce8e6; color: #c5221f; }
+    .rxn-btn.active-wait { border-color: #fbbc04; background: #fef7e0; color: #b06000; }
   </style>
 </head>
 <body>
@@ -57,6 +64,14 @@
     </div>
 
     <div class="box hidden" id="question-section">
+      <label style="color:#1a73e8;">いまのペース・理解度は？（匿名で先生に伝わります）</label>
+      <div class="rxn-row">
+        <button id="rxn-good" class="rxn-btn">👍 順調</button>
+        <button id="rxn-hard" class="rxn-btn">😓 難しい</button>
+        <button id="rxn-wait" class="rxn-btn">✋ 待って</button>
+      </div>
+      <hr style="border:0; border-top:1px dashed #ccc; margin:15px 0;">
+
       <label>質問・メッセージ</label>
       <textarea id="question-text" rows="3" placeholder="メッセージを入力"></textarea>
       <button id="send-btn">送信 (Send)</button>
@@ -77,7 +92,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
   import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
-  import { getDatabase, ref, set, push, onValue, off, get } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
+  import { getDatabase, ref, set, push, onValue, off, get, remove } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyClWAd9abHRIb6-mHDqU8df-r2zTXkC4Dc",
@@ -109,31 +124,31 @@
   let expiryWatcherStarted = false;
   let questionUnsubscribers = [];
 
-  // ✅ 修正1: offlineTimer をモジュールスコープで管理
   let offlineTimer = null;
-
-  // ✅ 修正2: .info/connected リスナーの解除関数を保持
   let connectedListenerRef = null;
   let connectedListener = null;
 
-  // 質問リスナーを一括解除
+  // リアクションリスナー管理
+  let rxnUnsubscriber = null;
+  let rxnMonitorSessionId = null; // 現在リアクションを購読中のセッションID（重複購読防止）
+
+  // 質問リスナー＋リアクションリスナーを一括解除
   function detachQuestionListeners() {
     questionUnsubscribers.forEach(unsub => unsub());
     questionUnsubscribers = [];
+    if (rxnUnsubscriber) { rxnUnsubscriber(); rxnUnsubscriber = null; }
+    rxnMonitorSessionId = null;
   }
 
-  // ✅ 修正2: .info/connected リスナーを登録する関数（再登録防止）
   function startConnectionMonitor() {
     if (connectedListener) return;
     connectedListenerRef = ref(db, '.info/connected');
     connectedListener = onValue(connectedListenerRef, (snap) => {
       const offlineBanner = document.getElementById('offline-warning');
       if (snap.val() === true) {
-        // 接続回復時はタイマーをキャンセルして即バナーを隠す
         if (offlineTimer) { clearTimeout(offlineTimer); offlineTimer = null; }
         offlineBanner.classList.add('hidden');
       } else {
-        // ✅ 修正1 & 2: ログイン済み かつ タイマー未登録 の場合のみ警告
         if (currentUser && !offlineTimer) {
           offlineTimer = setTimeout(() => {
             offlineBanner.classList.remove('hidden');
@@ -143,7 +158,6 @@
     });
   }
 
-  // ✅ 修正2: .info/connected リスナーを解除する関数
   function stopConnectionMonitor() {
     if (connectedListenerRef && connectedListener) {
       off(connectedListenerRef, connectedListener);
@@ -154,23 +168,31 @@
     document.getElementById('offline-warning').classList.add('hidden');
   }
 
-  // ✅ 修正4: visibilitychange で期限切れを即時チェック
+  // 講義終了時の共通処理（重複していた3箇所を関数化）
+  function handleSessionEnd() {
+    currentSessionId = null;
+    document.getElementById('interactive-area').classList.add('hidden');
+    setLock(false);
+    document.getElementById('question-section').classList.add('hidden');
+    detachQuestionListeners();
+    document.getElementById('my-questions-container').classList.add('hidden');
+    document.getElementById('my-questions-list').replaceChildren();
+
+    // リアクションUIのリセット
+    document.querySelectorAll('.rxn-btn').forEach(b => b.classList.remove('active-good', 'active-hard', 'active-wait'));
+
+    if (wasInLecture) {
+      showLectureEndedMessage();
+      wasInLecture = false;
+    }
+  }
+
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState !== 'visible' || !currentSessionId) return;
     const snap = await get(ref(db, 'active_session'));
     const val = snap.val();
     if (val && val.expiresAt && Date.now() > val.expiresAt) {
-      currentSessionId = null;
-      document.getElementById('interactive-area').classList.add('hidden');
-      setLock(false);
-      document.getElementById('question-section').classList.add('hidden');
-      detachQuestionListeners();
-      document.getElementById('my-questions-container').classList.add('hidden');
-      document.getElementById('my-questions-list').replaceChildren();
-      if (wasInLecture) {
-        showLectureEndedMessage();
-        wasInLecture = false;
-      }
+      handleSessionEnd();
     }
   });
 
@@ -185,7 +207,6 @@
       document.getElementById('login-section').classList.add('hidden');
       document.getElementById('main-section').classList.remove('hidden');
 
-      // ✅ 修正2: ログイン後に接続監視を開始
       startConnectionMonitor();
       monitorSession();
       startExpiryWatcher();
@@ -194,7 +215,6 @@
       signOut(auth);
     } else {
       currentUser = null;
-      // ✅ 修正1 & 2: ログアウト時に接続監視を停止・タイマーをクリア
       stopConnectionMonitor();
       document.getElementById('login-section').classList.remove('hidden');
       document.getElementById('main-section').classList.add('hidden');
@@ -227,19 +247,8 @@
         wasInLecture = true;
         checkAttendanceStatus();
       } else {
-        currentSessionId = null;
-        areaEl.classList.add('hidden');
-        setLock(false);
-        document.getElementById('question-section').classList.add('hidden');
-        detachQuestionListeners();
-        document.getElementById('my-questions-container').classList.add('hidden');
-        document.getElementById('my-questions-list').replaceChildren();
-        if (wasInLecture) {
-          showLectureEndedMessage();
-          wasInLecture = false;
-        } else {
-          showWaitingMessage();
-        }
+        handleSessionEnd();
+        if (!wasInLecture) showWaitingMessage();
       }
     });
   }
@@ -252,17 +261,7 @@
       const snap = await get(ref(db, 'active_session'));
       const val = snap.val();
       if (val && val.expiresAt && Date.now() > val.expiresAt) {
-        currentSessionId = null;
-        document.getElementById('interactive-area').classList.add('hidden');
-        setLock(false);
-        document.getElementById('question-section').classList.add('hidden');
-        detachQuestionListeners();
-        document.getElementById('my-questions-container').classList.add('hidden');
-        document.getElementById('my-questions-list').replaceChildren();
-        if (wasInLecture) {
-          showLectureEndedMessage();
-          wasInLecture = false;
-        }
+        handleSessionEnd();
       }
     }, 30 * 1000);
   }
@@ -278,6 +277,7 @@
       btn.disabled = true;
       setLock(true);
       qSection.classList.remove('hidden');
+      startReactionMonitor(); // 出席済みならリアクション監視開始（重複購読は内部で防止）
     } else {
       btn.textContent = "出席 (Attendance) を報告";
       btn.disabled = false;
@@ -305,7 +305,7 @@
       return alert("学籍番号と氏名を入力してください。");
     }
 
-    sname = sname.replace(/[\s ]+/g, ' ');
+    sname = sname.replace(/[\s　]+/g, ' ');
     if (!sname.includes(' ')) {
       if (!confirm("苗字と名前の間にスペースがありません。よろしいですか？（例：近大 太郎）")) {
         btn.disabled = false;
@@ -338,13 +338,51 @@
     }
   };
 
+  // ＝＝＝ リアクション関連のロジック ＝＝＝
+  function startReactionMonitor() {
+    if (!currentSessionId || !currentUser) return;
+    // すでに同じセッションを購読中なら何もしない（無駄な再購読の防止）
+    if (rxnUnsubscriber && rxnMonitorSessionId === currentSessionId) return;
+    // 別セッションを購読中だった場合は解除してから貼り直す
+    if (rxnUnsubscriber) { rxnUnsubscriber(); rxnUnsubscriber = null; }
+
+    const monitoringSessionId = currentSessionId;
+    rxnMonitorSessionId = monitoringSessionId;
+    const rxnRef = ref(db, `reactions/${monitoringSessionId}/${currentUser.uid}`);
+    rxnUnsubscriber = onValue(rxnRef, (snap) => {
+      // 一旦すべての色をクリア
+      document.querySelectorAll('.rxn-btn').forEach(b => b.classList.remove('active-good', 'active-hard', 'active-wait'));
+      if (snap.exists()) {
+        const st = snap.val().status;
+        const btn = document.getElementById(`rxn-${st}`);
+        if (btn) btn.classList.add(`active-${st}`);
+      }
+    });
+  }
+
+  function handleRxn(status) {
+    if (!currentSessionId || !currentUser) return;
+    const btn = document.getElementById(`rxn-${status}`);
+    const rxnRef = ref(db, `reactions/${currentSessionId}/${currentUser.uid}`);
+
+    // すでに選択中のボタンを押した場合は「取り消し（DBから削除）」
+    if (btn.classList.contains(`active-${status}`)) {
+      remove(rxnRef).catch(e => console.error(e));
+    } else {
+      set(rxnRef, { status: status, timestamp: Date.now() }).catch(e => console.error(e));
+    }
+  }
+
+  document.getElementById('rxn-good').onclick = () => handleRxn('good');
+  document.getElementById('rxn-hard').onclick = () => handleRxn('hard');
+  document.getElementById('rxn-wait').onclick = () => handleRxn('wait');
+  // ＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝
+
   document.getElementById('send-btn').onclick = async () => {
     const bodyText = document.getElementById('question-text').value.trim();
     if (!bodyText || !currentSessionId) return;
 
-    // ✅ 修正5: 送信直前にセッションIDをローカル変数に固定
     const sessionIdAtSend = currentSessionId;
-
     const sid = document.getElementById('student-id').value.trim().toUpperCase();
     const sname = document.getElementById('student-name').value.trim();
 
@@ -399,7 +437,6 @@
 
     } catch (e) {
       console.error(e);
-      // ✅ 修正5: 講義終了による失敗と通信エラーを区別して表示
       if (!currentSessionId) {
         alert("講義が終了したため、メッセージを送信できませんでした。");
       } else {
@@ -408,7 +445,6 @@
     }
   };
 
-  // ✅ 修正1: ログアウト前にタイマーと接続監視を確実にクリア
   document.getElementById('login-btn').onclick = () => signInWithPopup(auth, provider);
   document.getElementById('logout-btn').onclick = () => {
     stopConnectionMonitor();
