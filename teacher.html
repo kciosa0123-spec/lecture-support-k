@@ -1,1 +1,796 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>近大・講義支援ダッシュボード</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 1200px; margin: 0 auto; padding: 10px; background: #f4f7f6; line-height: 1.5; }
+    .box { background: #fff; padding: 12px; border: 1px solid #ddd; border-radius: 10px; margin-bottom: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+    .timetable-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 10px; transition: max-height 0.3s ease-out; overflow: hidden; }
+    .day-column { background: #e3f2fd; padding: 10px; border-radius: 8px; border: 1px solid #bbdefb; }
+    .day-title { font-weight: bold; text-align: center; margin-bottom: 8px; color: #1565c0; border-bottom: 2px solid #90caf9; padding-bottom: 3px; font-size: 13px; }
+    .period-slot { margin-bottom: 8px; min-height: 40px; }
+    .period-label { font-size: 10px; color: #888; margin-bottom: 2px; }
+    .empty-slot { border: 1px dashed #ccc; border-radius: 6px; height: 35px; display: flex; align-items: center; justify-content: center; color: #bbb; font-size: 11px; }
+    .subject-btn { width: 100%; background: #fff; color: #333; border: 1px solid #bbb; padding: 6px; border-radius: 6px; text-align: left; font-size: 12px; cursor: pointer; transition: 0.2s; font-weight: bold; }
+    .subject-btn:hover { background: #f0f0f0; border-color: #4285f4; }
+    .subject-btn.active { background: #4285f4; color: #fff; border-color: #4285f4; }
+    .session-grid-mini { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; margin-top: 5px; padding: 5px; background: rgba(255,255,255,0.7); border-radius: 6px; border: 1px solid #dee2e6; display: none; }
+    .session-btn { background: #eee; border: 1px solid #ccc; font-size: 10px; padding: 4px 0; border-radius: 4px; cursor: pointer; color: #666; font-weight: bold; text-align: center; }
+    .session-btn.has-data { background: #34a853; color: #fff; border-color: #2d8a47; }
+    .session-btn.selected { outline: 3px solid #ffc107; z-index: 1; }
+    #timetable-toggle-btn { width: 100%; padding: 8px; background: #6c757d; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-bottom: 15px; font-size: 12px; transition: 0.2s; }
+    #timetable-toggle-btn:hover { background: #5a6268; }
+    .search-area { background: #e8eaf6; border: 1px solid #c5cae9; padding: 10px; }
+    #search-results-table { width: 100%; border-collapse: collapse; font-size: 11px; background: white; margin-top: 8px; }
+    #search-results-table th { background: #3f51b5; color: white; padding: 6px; }
+    #search-results-table td { padding: 6px; border-bottom: 1px solid #eee; }
+    .question-card { background: white; border: 1px solid #ddd; border-left: 5px solid #4285f4; padding: 10px; margin-bottom: 8px; border-radius: 6px; position: relative; }
+    .question-card.answered { border-left-color: #ccc; opacity: 0.5; background: #f9f9f9; }
+    #questions-container.hide-answered .answered { display: none; }
+    button { color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 13px; }
+    .btn-blue { background: #4285f4; }
+    .btn-warning { background: #ffc107; color: #333; }
+    .btn-danger { background: #dc3545; }
+    .btn-success { background: #28a745; }
+    .btn-secondary { background: #6c757d; }
+    .btn-outline { background: #fff; color: #666; border: 1px solid #ccc; padding: 4px 8px; font-weight: normal; font-size: 11px; }
+    .btn-outline.active { background: #666; color: #fff; border-color: #666; }
+    .hidden { display: none !important; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { text-align: left; padding: 6px; border-bottom: 1px solid #eee; }
+    .q-header { font-size: 11px; color: #666; display: flex; justify-content: space-between; align-items: center; }
+    .q-body { font-weight: bold; margin-top: 4px; font-size: 14px; white-space: pre-wrap; color: #222; }
+    .q-toggle { padding: 3px 8px; font-size: 11px; border-radius: 4px; border: none; cursor: pointer; }
+    .q-toggle.read { background: #ccc; color: #fff; }
+    .q-toggle.unread { background: #ffc107; color: #333; }
 
+    /* アラート用トランジション */
+    #reaction-panel { transition: background-color 0.4s ease, border-color 0.4s ease; }
+
+    /* 統計ボックス用CSS（未回答ボタンをクリック可能にする装飾） */
+    .stat-box { flex: 1; padding: 6px; background: white; border-radius: 6px; border: 1px solid #ddd; text-align: center; }
+    .stat-box.clickable { cursor: pointer; transition: 0.2s; position: relative; }
+    .stat-box.clickable:hover { background: #e9ecef; border-color: #adb5bd; transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+  </style>
+</head>
+<body>
+
+  <h2 style="font-size: 1.2rem; margin: 5px 0 10px 0; color: #c00;">Kindai University 講義支援ツール</h2>
+
+  <div id="offline-warning" class="hidden" style="background: #ea4335; color: white; padding: 12px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; font-size: 13px; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">
+    ⚠️ ネットワーク接続が切れています。リアルタイム更新が停止しています。通信環境を確認してください。
+  </div>
+
+  <div id="login-section" class="box" style="text-align: center; padding: 30px;">
+    <button id="login-btn" type="button" class="btn-blue" style="font-size: 16px;">Googleでログイン</button>
+  </div>
+
+  <div id="dashboard-section" class="hidden">
+
+    <button id="timetable-toggle-btn" type="button">📅 時間割選択エリアを隠す</button>
+
+    <div id="timetable-wrapper">
+      <div class="box search-area">
+        <div style="display: flex; gap: 5px; align-items: center;">
+          <input type="text" id="global-search-input" placeholder="学籍番号、氏名、内容で検索..." style="flex:1; padding: 6px; border-radius: 5px; border: 1px solid #ccc; font-size: 12px;">
+          <button id="global-search-btn" class="btn-blue" style="padding: 6px 10px; font-size: 12px;">検索</button>
+          <button id="clear-search-btn" class="btn-secondary" style="padding: 6px 10px; font-size: 12px;">クリア</button>
+        </div>
+        <div id="search-results-area" class="hidden" style="max-height: 200px; overflow-y: auto; margin-top: 10px; border-top: 1px solid #3f51b5;">
+          <table id="search-results-table">
+            <thead><tr><th>講義</th><th>タイプ</th><th>対象</th><th>内容</th></tr></thead>
+            <tbody id="search-results-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="timetable-grid">
+        <div class="day-column"><div class="day-title">水曜日</div><div id="subjects-wed"></div></div>
+        <div class="day-column"><div class="day-title">木曜日</div><div id="subjects-thu"></div></div>
+      </div>
+    </div>
+
+    <div class="box" id="active-panel" style="border-top: 5px solid #c00; padding: 10px;">
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div>
+          <span style="font-size: 10px; color: #666;">選択中:</span>
+          <h3 id="current-display-label" style="margin: 0; font-size: 14px; color: #111;">科目を選択してください</h3>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 5px;">
+          <div id="data-actions" class="hidden">
+            <button id="export-csv-btn" class="btn-success" style="padding: 6px 10px; font-size: 12px;">CSV</button>
+            <button id="delete-btn" class="btn-danger" style="padding: 6px 10px; font-size: 12px; margin-left:5px;">削除</button>
+          </div>
+          <div id="start-actions">
+            <button id="start-lecture-btn" class="btn-warning" style="padding: 6px 10px; font-size: 12px;">講義開始</button>
+            <button id="end-lecture-btn" class="btn-danger hidden" style="padding: 6px 10px; font-size: 12px;">終了</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="box" style="padding: 10px;">
+
+      <div id="reaction-panel" class="hidden" style="background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 8px; padding: 10px; margin-bottom: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-weight: bold; font-size: 13px; color: #333;">📊 クラスの理解度（リアルタイム）</span>
+          <button id="reset-rxn-btn" class="btn-outline" style="font-size: 11px;">🔄 リセット</button>
+        </div>
+        <div style="display: flex; gap: 5px; font-size: 11px;">
+          <div id="stat-good" class="stat-box">👍 順調<br><b style="font-size:15px; color:#137333;">0</b></div>
+          <div id="stat-hard" class="stat-box">😓 難しい<br><b style="font-size:15px; color:#c5221f;">0</b></div>
+          <div id="stat-wait" class="stat-box">✋ 待って<br><b style="font-size:15px; color:#b06000;">0</b></div>
+          <div id="stat-none" class="stat-box clickable" title="クリックして未回答の学生一覧を表示">⚪️ 未回答<br><b style="font-size:15px;">0</b></div>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; margin-bottom: 8px; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 13px; font-weight: bold;">出席: <span id="att-count" style="color:#28a745; font-size:1.2em;">0</span> 名</span>
+          <div style="display: flex; gap: 3px;">
+            <button id="filter-all-btn" class="btn-outline active">すべて</button>
+            <button id="filter-unanswered-btn" class="btn-outline">未回答</button>
+          </div>
+        </div>
+        <button id="toggle-list-btn" class="btn-secondary" style="padding: 4px 8px; font-size: 11px;">名簿</button>
+      </div>
+      <div id="att-list-container" class="hidden" style="max-height: 150px; overflow-y: auto; margin-bottom: 10px;">
+        <table>
+          <thead><tr><th>学籍番号</th><th>氏名</th><th>時刻</th></tr></thead>
+          <tbody id="att-list-body"></tbody>
+        </table>
+      </div>
+      <hr style="border: 0; border-top: 1px solid #eee; margin: 8px 0;">
+      <div id="questions-container"></div>
+    </div>
+
+    <div style="text-align: right; margin-top: 15px;">
+      <span id="user-info" style="font-size: 10px; color: #999; margin-right: 5px;"></span>
+      <button id="logout-btn" class="btn-secondary" style="font-size: 10px; padding: 3px 8px;">ログアウト</button>
+    </div>
+  </div>
+
+  <div id="unanswered-modal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 20px; border-radius: 10px; width: 90%; max-width: 400px; max-height: 80vh; display: flex; flex-direction: column;">
+      <h3 style="margin-top: 0; color: #333; font-size: 16px;">⚪️ 未回答の学生一覧</h3>
+      <p style="font-size: 11px; color: #666; margin-top: -10px;">出席報告済みで、リアクションをまだ押していない学生です。</p>
+      <ul id="unanswered-list" style="list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; font-size: 13px; line-height: 1.8; border: 1px solid #eee; border-radius: 6px; padding: 10px; background: #f9f9f9;"></ul>
+      <button id="close-unanswered-modal" class="btn-secondary" style="width: 100%; padding: 10px; margin-top: 15px;">閉じる</button>
+    </div>
+  </div>
+
+  <div id="confirm-modal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 20px; border-radius: 10px; width: 90%; max-width: 400px; display: flex; flex-direction: column;">
+      <h3 id="confirm-title" style="margin-top: 0; color: #333; font-size: 16px;"></h3>
+      <p id="confirm-text" style="font-size: 13px; color: #444; line-height: 1.6; white-space: pre-wrap;"></p>
+      <div style="display: flex; gap: 10px; margin-top: 10px;">
+        <button id="confirm-cancel" class="btn-secondary" style="flex: 1; padding: 10px;">キャンセル</button>
+        <button id="confirm-ok" class="btn-danger" style="flex: 1; padding: 10px;">OK</button>
+      </div>
+    </div>
+  </div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+  import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+  import { getDatabase, ref, set, get, onValue, update, remove, off } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyClWAd9abHRIb6-mHDqU8df-r2zTXkC4Dc",
+    authDomain: "lecture-support-kindai.firebaseapp.com",
+    databaseURL: "https://lecture-support-kindai-default-rtdb.firebaseio.com",
+    projectId: "lecture-support-kindai",
+    storageBucket: "lecture-support-kindai.firebasestorage.app",
+    messagingSenderId: "1009012365626",
+    appId: "1:1009012365626:web:13156cb27fd5d3a3ed1803"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getDatabase(app);
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+
+  const ADMINS = ["0499b1@waka.kindai.ac.jp", "ng_osada@nara.kindai.ac.jp"];
+  const LECTURE_DURATION_MS = 110 * 60 * 1000;
+  const timetable = {
+    wed: { 2: "理系英語１", 3: "理系英語１", 4: "理系英語１" },
+    thu: { 1: "英語３", 3: "英語３", 4: "英語３" }
+  };
+
+  let viewingSessionId = "";
+  let activeSessionId = "";
+  let offlineTimer = null;
+
+  let attListener = null;
+  let attListenerRef = null;
+  let qListener = null;
+  let qListenerRef = null;
+
+  let rxnListenerRef = null;
+  let rxnListener = null;
+  let rawRxnData = {};
+
+  // 出席者の詳細データをローカルに保持（未回答者特定のため）
+  let currentAttData = {};
+  let currentAttCount = 0;
+
+  let activeSessionListener = null;
+  let activeSessionRef = null;
+
+  function detachListeners() {
+    if (attListenerRef && attListener) { off(attListenerRef, attListener); attListener = null; attListenerRef = null; }
+    if (qListenerRef   && qListener)   { off(qListenerRef,   qListener);   qListener   = null; qListenerRef   = null; }
+    if (rxnListenerRef && rxnListener) { off(rxnListenerRef, rxnListener); rxnListener = null; rxnListenerRef = null; }
+    // 集計用ローカルデータも初期化（前の回のデータが残らないように）
+    rawRxnData = {};
+    currentAttData = {};
+    currentAttCount = 0;
+  }
+
+  // ＝＝＝ 汎用確認モーダル（ブラウザの confirm に依存しない） ＝＝＝
+  // 「このページでこれ以上ダイアログを表示しない」を押されても確実に動作する。
+  let confirmOkHandler = null;
+  function showConfirm({ title, message, okLabel = 'OK', okClass = 'btn-danger', onOk }) {
+    const modal = document.getElementById('confirm-modal');
+    document.getElementById('confirm-title').textContent = title || '';
+    document.getElementById('confirm-text').textContent = message || '';
+    const okBtn = document.getElementById('confirm-ok');
+    okBtn.textContent = okLabel;
+    okBtn.className = okClass;
+    confirmOkHandler = onOk;
+    modal.classList.remove('hidden');
+  }
+  function closeConfirm() {
+    document.getElementById('confirm-modal').classList.add('hidden');
+    confirmOkHandler = null;
+  }
+  document.getElementById('confirm-cancel').onclick = closeConfirm;
+  document.getElementById('confirm-ok').onclick = async () => {
+    const handler = confirmOkHandler;
+    closeConfirm();
+    if (handler) {
+      try {
+        await handler();
+      } catch (e) {
+        console.error(e);
+        alert("処理に失敗しました。通信環境を確認してください。");
+      }
+    }
+  };
+  // ＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝
+
+  // 時間割エリアの開閉トグル
+  const toggleBtn = document.getElementById('timetable-toggle-btn');
+  const wrapper = document.getElementById('timetable-wrapper');
+  toggleBtn.onclick = () => {
+    if (wrapper.style.display === 'none') {
+      wrapper.style.display = 'block';
+      toggleBtn.textContent = '📅 時間割選択エリアを隠す';
+      toggleBtn.style.background = '#6c757d';
+    } else {
+      wrapper.style.display = 'none';
+      toggleBtn.textContent = '📂 時間割選択エリアを表示する';
+      toggleBtn.style.background = '#4285f4';
+    }
+  };
+
+  // 通信状態を監視（チラつき防止3秒タイマー付き）
+  onValue(ref(db, '.info/connected'), (snap) => {
+    const offlineBanner = document.getElementById('offline-warning');
+    if (snap.val() === true) {
+      if (offlineTimer) { clearTimeout(offlineTimer); offlineTimer = null; }
+      offlineBanner.classList.add('hidden');
+    } else {
+      if (auth.currentUser && !offlineTimer) {
+        offlineTimer = setTimeout(() => {
+          offlineBanner.classList.remove('hidden');
+        }, 3000);
+      }
+    }
+  });
+
+  // 時間割グリッドを構築
+  Object.keys(timetable).forEach(day => {
+    const container = document.getElementById(`subjects-${day}`);
+    for (let p = 1; p <= 4; p++) {
+      const slot = document.createElement('div');
+      slot.className = 'period-slot';
+      const label = document.createElement('div'); label.className = 'period-label'; label.textContent = `${p}限`;
+      slot.appendChild(label);
+      if (timetable[day][p]) {
+        const sub = timetable[day][p];
+        const btn = document.createElement('button'); btn.className = 'subject-btn'; btn.textContent = sub;
+        btn.onclick = () => window.toggleSubject(btn, day, sub, p);
+        const grid = document.createElement('div'); grid.className = 'session-grid-mini'; grid.id = `grid-${day}-${p}`;
+        for (let i = 1; i <= 15; i++) {
+          const b = document.createElement('button'); b.className = 'session-btn'; b.textContent = i; b.id = `btn-${day}-${p}-${i}`;
+          b.onclick = (e) => { e.stopPropagation(); window.loadSession(day, sub, p, i); };
+          grid.appendChild(b);
+        }
+        slot.appendChild(btn); slot.appendChild(grid);
+      } else {
+        const empty = document.createElement('div'); empty.className = 'empty-slot'; empty.textContent = "-";
+        slot.appendChild(empty);
+      }
+      container.appendChild(slot);
+    }
+  });
+
+  window.toggleSubject = (btn, day, sub, p) => {
+    const targetGrid = document.getElementById(`grid-${day}-${p}`);
+    const isAlreadyOpen = targetGrid.style.display === 'grid';
+    document.querySelectorAll('.session-grid-mini').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.subject-btn').forEach(el => el.classList.remove('active'));
+    if (!isAlreadyOpen) { targetGrid.style.display = 'grid'; btn.classList.add('active'); scanDataPresence(day, sub, p); }
+  };
+
+  async function scanDataPresence(day, sub, p) {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+      const token = await user.getIdToken();
+      const res = await fetch(
+        `https://lecture-support-kindai-default-rtdb.firebaseio.com/attendance.json?shallow=true&auth=${token}`
+      );
+      if (!res.ok) return;
+      const keys = await res.json();
+      if (!keys) return;
+
+      const dName = { wed: "水", thu: "木" }[day];
+      for (let i = 1; i <= 15; i++) {
+        const btn = document.getElementById(`btn-${day}-${p}-${i}`);
+        if (btn.dataset.actualId) continue;
+        const found = Object.keys(keys).find(id =>
+          id.includes(`${dName}${p}`) && id.includes(sub) && id.includes(`第${i}回`)
+        );
+        if (found) { btn.classList.add('has-data'); btn.dataset.actualId = found; }
+      }
+    } catch (e) {
+      console.warn("scanDataPresence failed:", e);
+    }
+  }
+
+  function updateStartButtonState() {
+    const btn = document.getElementById('start-lecture-btn');
+    if (!viewingSessionId) return;
+    if (viewingSessionId === activeSessionId) {
+      btn.textContent = "講義中(更新)";
+      btn.className = "btn-success";
+    } else {
+      const sessionBtn = document.querySelector('.session-btn.selected');
+      if (sessionBtn && sessionBtn.classList.contains('has-data')) {
+        btn.textContent = "再開/更新";
+        btn.className = "btn-success";
+      } else {
+        btn.textContent = "講義開始";
+        btn.className = "btn-warning";
+      }
+    }
+  }
+
+  window.loadSession = (day, sub, p, num) => {
+    const btn = document.getElementById(`btn-${day}-${p}-${num}`);
+    const dName = { wed: "水", thu: "木" }[day];
+    const now = new Date();
+    // 【修正】toISOString() はUTC基準のため、日本時間の午前9時前に新規作成すると
+    // 前日の日付になるバグがあった。ローカル（日本時間）の日付で組み立てる。
+    const dStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    const id = btn.dataset.actualId || `${dStr}_${dName}${p}${sub}第${num}回`;
+
+    detachListeners();
+    viewingSessionId = id;
+
+    let dLabel = "";
+    const m = id.match(/^(\d{4})(\d{2})(\d{2})_/);
+    if (m) dLabel = ` (${parseInt(m[2])}月${parseInt(m[3])}日)`;
+    else dLabel = ` (${now.getMonth() + 1}月${now.getDate()}日)`;
+
+    document.querySelectorAll('.session-btn').forEach(el => el.classList.remove('selected'));
+    btn.classList.add('selected');
+    document.getElementById('current-display-label').textContent = `${dName}曜${p}限：${sub} 【第${num}回】${dLabel}`;
+    document.getElementById('data-actions').classList.toggle('hidden', !btn.classList.contains('has-data'));
+
+    updateStartButtonState();
+    startMonitoring(id);
+
+    wrapper.style.display = 'none';
+    toggleBtn.textContent = '📂 時間割選択エリアを表示する';
+    toggleBtn.style.background = '#4285f4';
+  };
+
+  document.getElementById('filter-all-btn').onclick = function () {
+    document.getElementById('questions-container').classList.remove('hide-answered');
+    this.classList.add('active'); document.getElementById('filter-unanswered-btn').classList.remove('active');
+  };
+  document.getElementById('filter-unanswered-btn').onclick = function () {
+    document.getElementById('questions-container').classList.add('hide-answered');
+    this.classList.add('active'); document.getElementById('filter-all-btn').classList.remove('active');
+  };
+
+  onAuthStateChanged(auth, (u) => {
+    if (!u) {
+      document.getElementById('dashboard-section').classList.add('hidden');
+      document.getElementById('login-section').classList.remove('hidden');
+      return;
+    }
+    if (ADMINS.includes(u.email.toLowerCase())) {
+      document.getElementById('login-section').classList.add('hidden');
+      document.getElementById('dashboard-section').classList.remove('hidden');
+      document.getElementById('user-info').textContent = u.email;
+
+      // active_session リスナーの多重登録防止
+      if (activeSessionRef && activeSessionListener) {
+        off(activeSessionRef, activeSessionListener);
+      }
+      activeSessionRef = ref(db, 'active_session');
+      activeSessionListener = onValue(activeSessionRef, async (s) => {
+        const v = s.val();
+        if (v && v.expiresAt && Date.now() > v.expiresAt) {
+          console.log("期限切れの講義を自動終了します:", v.id);
+          await remove(ref(db, 'active_session'));
+          return;
+        }
+        activeSessionId = (v && v.isOpen) ? v.id : "";
+        document.getElementById('end-lecture-btn').classList.toggle('hidden', !activeSessionId);
+        updateStartButtonState();
+      });
+    } else {
+      alert("管理権限がありません。");
+      signOut(auth);
+    }
+  });
+
+  function buildAttendanceRow(e) {
+    const tr = document.createElement('tr');
+    const td1 = document.createElement('td'); td1.textContent = e.studentId || "";
+    const td2 = document.createElement('td'); td2.textContent = e.name || "";
+    const td3 = document.createElement('td');
+    td3.textContent = e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : "";
+    tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+    return tr;
+  }
+
+  function buildQuestionCard(key, q) {
+    const content = q.body || q.text || "(内容なし)";
+    const isRead = (q.read !== undefined) ? q.read : (q.answered || false);
+
+    const card = document.createElement('div');
+    card.id = `q-${key}`;
+    card.className = `question-card ${isRead ? 'answered' : ''}`;
+
+    const header = document.createElement('div');
+    header.className = 'q-header';
+
+    const small = document.createElement('small');
+    const sid = q.studentId ? String(q.studentId).toUpperCase() : "";
+    const name = q.name || "";
+    small.textContent = (sid && name) ? `${sid} ${name}` : (q.email || "");
+    header.appendChild(small);
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = `q-toggle ${isRead ? 'read' : 'unread'}`;
+    toggleBtn.textContent = isRead ? '済' : '未';
+    toggleBtn.onclick = () => update(ref(db, `questions/${viewingSessionId}/${key}`), { read: !isRead });
+    header.appendChild(toggleBtn);
+
+    const body = document.createElement('div');
+    body.className = 'q-body';
+    body.textContent = content;
+
+    card.appendChild(header);
+    card.appendChild(body);
+    return card;
+  }
+
+  // 出席者の uid 集合を基準に集計する（出席者以外のリアクションは数えない）
+  function updateReactionSummary() {
+    let good = 0, hard = 0, wait = 0;
+    const attUids = Object.keys(currentAttData);
+
+    attUids.forEach(uid => {
+      const d = rawRxnData[uid];
+      if (!d) return;
+      if (d.status === 'good') good++;
+      else if (d.status === 'hard') hard++;
+      else if (d.status === 'wait') wait++;
+    });
+
+    const total = currentAttCount;
+    const reacted = good + hard + wait;
+    const none = Math.max(0, total - reacted);
+    const pct = (num) => total > 0 ? Math.round((num / total) * 100) : 0;
+
+    document.getElementById('stat-good').innerHTML = `👍 順調<br><b style="font-size:15px; color:#137333;">${good}</b> <span style="font-size:10px;">(${pct(good)}%)</span>`;
+    document.getElementById('stat-hard').innerHTML = `😓 難しい<br><b style="font-size:15px; color:#c5221f;">${hard}</b> <span style="font-size:10px;">(${pct(hard)}%)</span>`;
+    document.getElementById('stat-wait').innerHTML = `✋ 待って<br><b style="font-size:15px; color:#b06000;">${wait}</b> <span style="font-size:10px;">(${pct(wait)}%)</span>`;
+    document.getElementById('stat-none').innerHTML = `⚪️ 未回答<br><b style="font-size:15px;">${none}</b> <span style="font-size:10px;">(${pct(none)}%)</span>`;
+
+    const panel = document.getElementById('reaction-panel');
+    if (pct(hard) >= 20) {
+      panel.style.background = "#fce8e6"; panel.style.borderColor = "#f4c7c3";
+    } else if (pct(wait) >= 20) {
+      panel.style.background = "#fef7e0"; panel.style.borderColor = "#fbe9a4";
+    } else {
+      panel.style.background = "#f8f9fa"; panel.style.borderColor = "#e9ecef";
+    }
+  }
+
+  function startMonitoring(sessionId) {
+    const attBody = document.getElementById('att-list-body');
+    const qCont = document.getElementById('questions-container');
+
+    document.getElementById('reaction-panel').classList.remove('hidden');
+
+    attListenerRef = ref(db, `attendance/${sessionId}`);
+    attListener = onValue(attListenerRef, (s) => {
+      const d = s.val() || {};
+      currentAttData = d; // 未回答者特定のために保存
+      const list = Object.values(d).sort((a, b) => (a.studentId || "").localeCompare(b.studentId || ""));
+      currentAttCount = list.length;
+      document.getElementById('att-count').textContent = currentAttCount;
+      attBody.replaceChildren();
+      list.forEach(e => attBody.appendChild(buildAttendanceRow(e)));
+      updateReactionSummary();
+    });
+
+    rxnListenerRef = ref(db, `reactions/${sessionId}`);
+    rxnListener = onValue(rxnListenerRef, (s) => {
+      rawRxnData = s.val() || {};
+      updateReactionSummary();
+    });
+
+    qListenerRef = ref(db, `questions/${sessionId}`);
+    qListener = onValue(qListenerRef, (s) => {
+      const d = s.val() || {};
+      const keys = Object.keys(d).reverse();
+      qCont.replaceChildren();
+      if (keys.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.fontSize = "12px";
+        empty.style.color = "#888";
+        empty.textContent = "質問はありません。";
+        qCont.appendChild(empty);
+        return;
+      }
+      keys.forEach(k => qCont.appendChild(buildQuestionCard(k, d[k])));
+    });
+  }
+
+  // === 未回答者モーダルの制御ロジック ===
+  document.getElementById('stat-none').onclick = () => {
+    if (!viewingSessionId || currentAttCount === 0) return;
+
+    // 出席者のうち、リアクションデータが存在しない学生を抽出
+    const unreacted = [];
+    Object.values(currentAttData).forEach(st => {
+      if (st && st.uid && !rawRxnData[st.uid]) unreacted.push(st);
+    });
+
+    // 学籍番号順にソート
+    unreacted.sort((a, b) => (a.studentId || "").localeCompare(b.studentId || ""));
+
+    const listEl = document.getElementById('unanswered-list');
+    listEl.replaceChildren(); // リストを初期化
+
+    if (unreacted.length === 0) {
+      const li = document.createElement('li');
+      li.textContent = "未回答の学生はいません。全員がリアクションしています！";
+      li.style.color = "#28a745";
+      listEl.appendChild(li);
+    } else {
+      unreacted.forEach(st => {
+        const li = document.createElement('li');
+        li.style.borderBottom = "1px solid #e9ecef";
+        li.style.padding = "4px 0";
+        li.textContent = `${st.studentId || ''} ${st.name || ''}`.trim();
+        listEl.appendChild(li);
+      });
+    }
+
+    document.getElementById('unanswered-modal').classList.remove('hidden');
+  };
+
+  document.getElementById('close-unanswered-modal').onclick = () => {
+    document.getElementById('unanswered-modal').classList.add('hidden');
+  };
+  // ============================================
+
+  // リアクションのリセット（汎用確認モーダルを使用）
+  document.getElementById('reset-rxn-btn').onclick = () => {
+    if (!viewingSessionId) return;
+    const label = document.getElementById('current-display-label').textContent;
+    showConfirm({
+      title: "🔄 リアクションのリセット",
+      message: `「${label}」の学生リアクションを全てリセット（未回答に戻す）しますか？`,
+      okLabel: "リセットする",
+      okClass: "btn-danger",
+      onOk: async () => {
+        if (!viewingSessionId) return;
+        await remove(ref(db, `reactions/${viewingSessionId}`));
+      }
+    });
+  };
+
+  function buildSearchRow(r) {
+    const tr = document.createElement('tr');
+    const t1 = document.createElement('td'); t1.textContent = r.sid;
+    const t2 = document.createElement('td'); t2.textContent = r.type;
+    const t3 = document.createElement('td'); t3.textContent = r.person;
+    const t4 = document.createElement('td'); t4.textContent = r.content;
+    tr.appendChild(t1); tr.appendChild(t2); tr.appendChild(t3); tr.appendChild(t4);
+    return tr;
+  }
+
+  document.getElementById('global-search-btn').onclick = async () => {
+    const query = document.getElementById('global-search-input').value.toLowerCase().trim();
+    if (!query) return;
+    const btn = document.getElementById('global-search-btn');
+    btn.textContent = "中..."; btn.disabled = true;
+    try {
+      const [as, qs] = await Promise.all([get(ref(db, 'attendance')), get(ref(db, 'questions'))]);
+      const results = [];
+      const ad = as.val() || {};
+      const qd = qs.val() || {};
+      Object.keys(ad).forEach(sid => Object.keys(ad[sid]).forEach(uid => {
+        const a = ad[sid][uid];
+        const comb = ((a.studentId || "") + (a.name || "") + (a.email || "")).toLowerCase();
+        if (comb.includes(query)) results.push({ sid, type: "出席", person: `${a.studentId} / ${a.name || '-'}`, content: "---", time: a.timestamp });
+      }));
+      Object.keys(qd).forEach(sid => Object.keys(qd[sid]).forEach(qid => {
+        const q = qd[sid][qid];
+        const content = q.body || q.text || "";
+        const comb = ((q.name || "") + (q.studentId || "") + (q.email || "") + content).toLowerCase();
+        if (comb.includes(query)) results.push({ sid, type: "質問", person: `${q.studentId || ''} / ${q.name || q.email || ''}`, content: content, time: q.timestamp });
+      }));
+      results.sort((a, b) => b.time - a.time);
+
+      const body = document.getElementById('search-results-body');
+      body.replaceChildren();
+      if (results.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 4; td.textContent = "なし";
+        tr.appendChild(td); body.appendChild(tr);
+      } else {
+        results.forEach(r => body.appendChild(buildSearchRow(r)));
+      }
+      document.getElementById('search-results-area').classList.remove('hidden');
+    } catch (e) {
+      console.error(e);
+      alert("検索に失敗しました。");
+    } finally {
+      btn.textContent = "検索"; btn.disabled = false;
+    }
+  };
+
+  document.getElementById('clear-search-btn').onclick = () => {
+    document.getElementById('global-search-input').value = "";
+    document.getElementById('search-results-area').classList.add('hidden');
+  };
+
+  document.getElementById('start-lecture-btn').onclick = async () => {
+    if (!viewingSessionId) return alert("回を選択してください。");
+    const title = document.getElementById('current-display-label').textContent;
+    if (!title || title === "科目を選択してください") {
+      return alert("回を選択してから開始してください。");
+    }
+
+    const doStart = async () => {
+      const now = Date.now();
+      await set(ref(db, 'active_session'), {
+        id: viewingSessionId,
+        title: title,
+        isOpen: true,
+        startedAt: now,
+        expiresAt: now + LECTURE_DURATION_MS
+      });
+      alert(`講義を開始しました。`);
+    };
+
+    if (activeSessionId && activeSessionId !== viewingSessionId) {
+      showConfirm({
+        title: "講義の切り替え",
+        message: `別の講義「${activeSessionId}」が進行中です。\nこの回に切り替えますか？`,
+        okLabel: "切り替える",
+        okClass: "btn-warning",
+        onOk: doStart
+      });
+    } else {
+      await doStart();
+    }
+  };
+
+  document.getElementById('end-lecture-btn').onclick = () => {
+    showConfirm({
+      title: "講義の終了",
+      message: "講義を終了します。学生の画面を待機中に戻します。",
+      okLabel: "終了する",
+      okClass: "btn-danger",
+      onOk: async () => {
+        await remove(ref(db, 'active_session'));
+        location.reload();
+      }
+    });
+  };
+
+  document.getElementById('export-csv-btn').onclick = async () => {
+    const [attSnap, qSnap, rxnSnap] = await Promise.all([
+      get(ref(db, `attendance/${viewingSessionId}`)),
+      get(ref(db, `questions/${viewingSessionId}`)),
+      get(ref(db, `reactions/${viewingSessionId}`))
+    ]);
+    const attData = attSnap.val() || {};
+    const qData = qSnap.val() || {};
+    const rxnData = rxnSnap.val() || {};
+    const rxnLabels = { good: '順調', hard: '難しい', wait: '待って' };
+
+    const qByUid = {};
+    Object.values(qData).forEach(q => {
+      const content = (q.body || q.text || "").trim();
+      if (!content || !q.uid) return;
+      if (!qByUid[q.uid]) qByUid[q.uid] = [];
+      qByUid[q.uid].push(content);
+    });
+
+    const list = Object.entries(attData)
+      .map(([uid, e]) => ({ uid, ...e }))
+      .sort((a, b) => (a.studentId || "").localeCompare(b.studentId || ""));
+
+    const esc = (v) => {
+      let s = String(v == null ? "" : v);
+      // 【修正】CSV数式インジェクション対策：
+      // 先頭が = + - @ のセルはExcelで数式として解釈されるため ' を付けて無効化する
+      if (/^[=+\-@]/.test(s)) s = "'" + s;
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    let csv = "\uFEFF学籍番号,氏名,出席時刻,最終理解度,質問内容\n";
+    list.forEach(e => {
+      const questions = qByUid[e.uid] || [];
+      const combined = questions.join(" / ");
+      const timeStr = e.timestamp ? new Date(e.timestamp).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : "";
+      const rxnStatus = rxnData[e.uid] ? rxnLabels[rxnData[e.uid].status] : '未回答';
+      csv += `${esc(e.studentId)},${esc(e.name)},${esc(timeStr)},${esc(rxnStatus)},${esc(combined)}\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${viewingSessionId}.csv`;
+    a.click();
+  };
+
+  document.getElementById('delete-btn').onclick = () => {
+    if (!viewingSessionId) return;
+    const targetId = viewingSessionId;
+    const label = document.getElementById('current-display-label').textContent;
+    showConfirm({
+      title: "データの完全削除",
+      message: `「${label}」の出席・質問・リアクションのデータを完全に削除しますか？\nこの操作は取り消せません。`,
+      okLabel: "削除する",
+      okClass: "btn-danger",
+      onOk: async () => {
+        detachListeners();
+        await Promise.all([
+          remove(ref(db, `attendance/${targetId}`)),
+          remove(ref(db, `questions/${targetId}`)),
+          remove(ref(db, `reactions/${targetId}`))
+        ]);
+        if (targetId === activeSessionId) await remove(ref(db, 'active_session'));
+        location.reload();
+      }
+    });
+  };
+
+  document.getElementById('toggle-list-btn').onclick = () => document.getElementById('att-list-container').classList.toggle('hidden');
+  document.getElementById('login-btn').onclick = () => signInWithPopup(auth, provider);
+  document.getElementById('logout-btn').onclick = () => signOut(auth).then(() => location.reload());
+</script>
+</body>
+</html>
